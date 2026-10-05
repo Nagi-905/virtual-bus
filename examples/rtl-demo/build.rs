@@ -10,7 +10,9 @@ fn main() {
         .model(
             Model::new("i2c_whoami", "i2c_whoami")
                 .source("i2c_whoami.v")
-                .flag("-Wall"),
+                .flag("-Wall")
+                // can write a VCD (`with_vcd`)
+                .trace(),
         )
         // I2C: the chip top without output enable or reset pins (vdd + power-on reset),
         // wrapped in a simulation-only wrapper
@@ -31,7 +33,9 @@ fn main() {
         .model(
             Model::new("spi_whoami", "spi_whoami")
                 .source("spi_whoami.v")
-                .flag("-Wall"),
+                .flag("-Wall")
+                // can write a VCD (`with_vcd`)
+                .trace(),
         )
         // SPI: the chip top without output enable or reset pins, wrapped in a simulation-only wrapper
         .model(

@@ -53,6 +53,9 @@ List your RTL files in `build.rs`, and your Rust drivers can talk to the RTL thr
 The ports are read from the RTL, and each becomes a typed method (`set_scl(true)`, `sda_low()`).
 No C++ testbench to write. Check firmware and RTL together before the chip exists.
 
+When a test fails, look inside the RTL: add `.trace()` to the model in `build.rs` and call
+`open_vcd`, and every signal is written to a VCD at the bus's simulated time (open it in GTKWave).
+
 ### Check a Rust model and the RTL against the same tests
 
 Run the same driver and the same tests against a model written in Rust and against the RTL.

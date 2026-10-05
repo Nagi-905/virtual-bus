@@ -5,6 +5,9 @@
 //! - [`VerilatedSpiWhoAmITop`]: the chip top without output enable (`spi_whoami_top.v`, tri-state MISO),
 //!   wrapped in a simulation wrapper (`sim/spi_whoami_sim.v`)
 
+use std::io;
+use std::path::Path;
+
 use crate::bindings::{spi_whoami, spi_whoami_sim};
 use virtual_bus::bus::spi::sim::SpiPinModel;
 
@@ -21,7 +24,18 @@ impl VerilatedSpiWhoAmI {
     /// Verilator initializes ports to 0, so `rst_n` is set to 1 and then to 0
     /// to create the falling edge of the asynchronous reset
     pub fn new() -> Self {
+        Self::reset(spi_whoami::Model::new())
+    }
+
+    /// Like [`Self::new`], and writes a VCD of every signal in the RTL to `path`,
+    /// at the bus's simulated time. The VCD is closed when the model is dropped
+    pub fn with_vcd(path: impl AsRef<Path>) -> io::Result<Self> {
         let mut m = spi_whoami::Model::new();
+        m.open_vcd(path)?;
+        Ok(Self::reset(m))
+    }
+
+    fn reset(mut m: spi_whoami::Model) -> Self {
         m.set_cs_n(true);
         for level in [true, false, true] {
             m.set_rst_n(level);
@@ -47,6 +61,10 @@ impl SpiPinModel for VerilatedSpiWhoAmI {
 
     fn miso(&self) -> Option<bool> {
         self.m.miso_oe().then(|| self.m.miso())
+    }
+
+    fn set_time_ps(&mut self, now_ps: u64) {
+        self.m.set_time_ps(now_ps);
     }
 }
 

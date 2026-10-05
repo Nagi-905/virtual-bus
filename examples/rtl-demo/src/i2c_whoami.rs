@@ -6,6 +6,9 @@
 //!   wrapped in a simulation wrapper (`sim/i2c_whoami_sim.v`)
 //! - [`VerilatedWhoAmIScl`]: `i2c_whoami_scl.v`. No system clock; runs on SCL / SDA only
 
+use std::io;
+use std::path::Path;
+
 use crate::bindings::{i2c_whoami, i2c_whoami_scl, i2c_whoami_sim};
 use virtual_bus::bus::i2c::sim::I2cPinModel;
 
@@ -25,7 +28,18 @@ impl VerilatedWhoAmI {
     /// The RTL reset is asynchronous, so no clock is needed. Verilator initializes ports to 0, though,
     /// so `rst_n` is set to 1 and then to 0 to create a falling edge
     pub fn new() -> Self {
+        Self::reset(i2c_whoami::Model::new())
+    }
+
+    /// Like [`Self::new`], and writes a VCD of every signal in the RTL to `path`,
+    /// at the bus's simulated time. The VCD is closed when the model is dropped
+    pub fn with_vcd(path: impl AsRef<Path>) -> io::Result<Self> {
         let mut m = i2c_whoami::Model::new();
+        m.open_vcd(path)?;
+        Ok(Self::reset(m))
+    }
+
+    fn reset(mut m: i2c_whoami::Model) -> Self {
         m.set_scl(true);
         m.set_sda_i(true);
         for level in [true, false, true] {
@@ -37,7 +51,8 @@ impl VerilatedWhoAmI {
 
     fn clock(&mut self) {
         self.m.set_clk(false);
-        self.m.eval();
+        // in the VCD, the low half goes half a period before this rising edge
+        self.m.eval_before(Self::PERIOD_PS / 2);
         self.m.set_clk(true);
         self.m.eval();
     }
@@ -51,9 +66,13 @@ impl Default for VerilatedWhoAmI {
 
 impl I2cPinModel for VerilatedWhoAmI {
     fn set_inputs(&mut self, scl: bool, sda: bool) {
-        // a synchronous circuit: evaluating on the system clock is enough
+        // a synchronous circuit: evaluating on the system clock is enough.
+        // When writing a VCD, evaluate now too so the inputs show up when they change
         self.m.set_scl(scl);
         self.m.set_sda_i(sda);
+        if self.m.is_tracing() {
+            self.m.eval();
+        }
     }
 
     fn period_ps(&self) -> Option<u64> {
@@ -66,6 +85,10 @@ impl I2cPinModel for VerilatedWhoAmI {
 
     fn sda_low(&self) -> bool {
         self.m.sda_low()
+    }
+
+    fn set_time_ps(&mut self, now_ps: u64) {
+        self.m.set_time_ps(now_ps);
     }
 }
 
