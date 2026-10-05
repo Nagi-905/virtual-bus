@@ -1,0 +1,12 @@
+[package]
+name = "virtual-bus-build"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "build.rs helper that turns Verilog into a Verilator model usable from virtual-bus"
+license = "MIT"
+publish = false
+
+[dependencies]
+# parallel: compile the Verilator runtime and the generated C++ on all cores (about 34 s → 15 s for rtl-demo)
+cc = { version = "1", features = ["parallel"] }

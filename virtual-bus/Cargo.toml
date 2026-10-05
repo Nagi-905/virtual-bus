@@ -1,0 +1,19 @@
+[package]
+name = "virtual-bus"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Virtual I2C / SPI buses for running embedded-hal 1.0 drivers against IC models (Rust or Verilator RTL) on your PC"
+license = "MIT"
+publish = false
+
+[dependencies]
+embedded-hal = "1.0"
+
+[dev-dependencies]
+embedded-hal-bus = { version = "0.3", features = ["std"] }
+mcp23017-driver = "0.1.2"
+
+[[example]]
+name = "mcp23017"
+path = "examples/mcp23017/main.rs"

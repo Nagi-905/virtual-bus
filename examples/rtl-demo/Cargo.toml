@@ -1,0 +1,18 @@
+[package]
+name = "rtl-demo"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "virtual-bus demo: model your own Verilog with Verilator and drive it with embedded-hal drivers"
+license = "MIT"
+publish = false
+
+[dependencies]
+virtual-bus = { path = "../../virtual-bus" }
+embedded-hal = "1.0"
+
+[build-dependencies]
+virtual-bus-build = { path = "../../virtual-bus-build" }
+
+[dev-dependencies]
+embedded-hal-bus = { version = "0.3", features = ["std"] }
