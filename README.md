@@ -2,6 +2,44 @@
 
 A Rust crate for running embedded-hal 1.0 I2C / SPI drivers against IC models on your PC, without real hardware.
 
+## Overview
+
+Your driver stays the same; only the layers under the embedded-hal traits are swapped.
+
+```mermaid
+flowchart TB
+    driver["Driver / application<br/>crates.io drivers or your own code, unchanged"]
+    hal["embedded-hal 1.0 traits<br/>I2c · SpiDevice · SpiBus · OutputPin · InputPin · DelayNs"]
+    driver --> hal
+
+    subgraph tx["Transaction level: fast"]
+        vbus["Virtual bus<br/>VirtualI2cBus / VirtualSpiDevice"]
+        rmodel["Rust model<br/>RegisterMap, or your own I2cSlave / SpiSlave"]
+        vbus --> rmodel
+    end
+
+    subgraph pin["Pin level: signals and timing"]
+        bitbang["Bit-bang master<br/>BitBangI2c / BitBangSpi"]
+        wires["Signal lines and simulated time<br/>SimI2cBus / SimSpiBus"]
+        pinmodel["Rust model on the lines<br/>PinLevelI2cSlave / PinLevelSpiSlave"]
+        rtl["RTL model<br/>your Verilog, via virtual-bus-build"]
+        bitbang --> wires
+        wires --> pinmodel
+        wires --> rtl
+    end
+
+    subgraph hw["Real hardware, for reference"]
+        master["I2C / SPI master peripheral"]
+        ic["Real IC"]
+        master --> ic
+    end
+
+    hal --> vbus
+    hal --> bitbang
+    hal -.-> master
+    vbus -. "attach_i2c: one address on the pin level" .-> bitbang
+```
+
 ## Features
 
 ### Test hardware-targeted code on your PC, unchanged
@@ -32,14 +70,7 @@ Time is simulated, so every run gives the same result, including timing-dependen
 ### Choose between speed and detail
 
 Use the fast byte-level path most of the time, and switch to the pin-level path only when you need to check timing.
-Both look the same to the driver.
-
-```text
-Driver (embedded-hal I2c / SpiDevice / SpiBus)
-   ├─ transaction level  VirtualI2cBus / VirtualSpiDevice ── Rust model
-   └─ pin level          BitBangI2c / BitBangSpi ── SimI2cBus / SimSpiBus ─┬─ Rust model
-                                                                            └─ Verilog RTL
-```
+Both look the same to the driver (see the diagram in [Overview](#overview)).
 
 ## Usage
 
