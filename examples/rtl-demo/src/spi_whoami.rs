@@ -5,13 +5,12 @@
 //! - [`VerilatedSpiWhoAmITop`]: the chip top without output enable (`spi_whoami_top.v`, tri-state MISO),
 //!   wrapped in a simulation wrapper (`sim/spi_whoami_sim.v`)
 
-use crate::bindings::{spi_whoami as pins, spi_whoami_sim as top_pins};
+use crate::bindings::{spi_whoami, spi_whoami_sim};
 use virtual_bus::bus::spi::sim::SpiPinModel;
-use virtual_bus::verilated::RawModel;
 
 /// SPI WHO_AM_I slave (0x0F = 0x33, 0x20 = CTRL, modes 0 / 3)
 pub struct VerilatedSpiWhoAmI {
-    raw: RawModel,
+    m: spi_whoami::Model,
 }
 
 impl VerilatedSpiWhoAmI {
@@ -22,13 +21,13 @@ impl VerilatedSpiWhoAmI {
     /// Verilator initializes ports to 0, so `rst_n` is set to 1 and then to 0
     /// to create the falling edge of the asynchronous reset
     pub fn new() -> Self {
-        let mut raw = RawModel::new(&pins::VTABLE);
-        raw.set(pins::CS_N, 1);
-        for level in [1, 0, 1] {
-            raw.set(pins::RST_N, level);
-            raw.eval();
+        let mut m = spi_whoami::Model::new();
+        m.set_cs_n(true);
+        for level in [true, false, true] {
+            m.set_rst_n(level);
+            m.eval();
         }
-        Self { raw }
+        Self { m }
     }
 }
 
@@ -40,16 +39,14 @@ impl Default for VerilatedSpiWhoAmI {
 
 impl SpiPinModel for VerilatedSpiWhoAmI {
     fn set_inputs(&mut self, cs_n: bool, sck: bool, mosi: bool) {
-        self.raw.set(pins::CS_N, u64::from(cs_n));
-        self.raw.set(pins::SCK, u64::from(sck));
-        self.raw.set(pins::MOSI, u64::from(mosi));
-        self.raw.eval();
+        self.m.set_cs_n(cs_n);
+        self.m.set_sck(sck);
+        self.m.set_mosi(mosi);
+        self.m.eval();
     }
 
     fn miso(&self) -> Option<bool> {
-        self.raw
-            .get_bit(pins::MISO_OE)
-            .then(|| self.raw.get_bit(pins::MISO))
+        self.m.miso_oe().then(|| self.m.miso())
     }
 }
 
@@ -65,7 +62,7 @@ impl SpiPinModel for VerilatedSpiWhoAmI {
 /// system clock, so the POR has no delay: while the power ([`Self::set_vdd`]) is off it is held in
 /// reset (MISO is Hi-Z), and the moment power comes back all registers, CTRL included, return to their reset values
 pub struct VerilatedSpiWhoAmITop {
-    raw: RawModel,
+    m: spi_whoami_sim::Model,
 }
 
 impl VerilatedSpiWhoAmITop {
@@ -80,25 +77,25 @@ impl VerilatedSpiWhoAmITop {
 
     /// Creates the model with power off
     pub fn new_unpowered() -> Self {
-        let mut raw = RawModel::new(&top_pins::VTABLE);
-        raw.set(top_pins::CS_N, 1);
+        let mut m = spi_whoami_sim::Model::new();
+        m.set_cs_n(true);
         // move vdd 1 → 0 so the power-off reset surely happens (staying at the initial 0 gives no edge)
-        for level in [1, 0] {
-            raw.set(top_pins::VDD, level);
-            raw.eval();
+        for level in [true, false] {
+            m.set_vdd(level);
+            m.eval();
         }
-        Self { raw }
+        Self { m }
     }
 
     /// Turns the power (vdd) on / off. gnd is tied to 0 inside the wrapper
     pub fn set_vdd(&mut self, on: bool) {
-        self.raw.set(top_pins::VDD, u64::from(on));
-        self.raw.eval();
+        self.m.set_vdd(on);
+        self.m.eval();
     }
 
     /// The MISO level resolved inside the wrapper
     pub fn miso_level(&self) -> bool {
-        self.raw.get_bit(top_pins::MISO_LEVEL)
+        self.m.miso_level()
     }
 }
 
@@ -110,10 +107,10 @@ impl Default for VerilatedSpiWhoAmITop {
 
 impl SpiPinModel for VerilatedSpiWhoAmITop {
     fn set_inputs(&mut self, cs_n: bool, sck: bool, mosi: bool) {
-        self.raw.set(top_pins::CS_N, u64::from(cs_n));
-        self.raw.set(top_pins::SCK, u64::from(sck));
-        self.raw.set(top_pins::MOSI, u64::from(mosi));
-        self.raw.eval();
+        self.m.set_cs_n(cs_n);
+        self.m.set_sck(sck);
+        self.m.set_mosi(mosi);
+        self.m.eval();
     }
 
     fn miso(&self) -> Option<bool> {

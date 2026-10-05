@@ -6,14 +6,13 @@
 //!   wrapped in a simulation wrapper (`sim/i2c_whoami_sim.v`)
 //! - [`VerilatedWhoAmIScl`]: `i2c_whoami_scl.v`. No system clock; runs on SCL / SDA only
 
-use crate::bindings::{i2c_whoami as pins, i2c_whoami_scl as scl_pins, i2c_whoami_sim as top_pins};
+use crate::bindings::{i2c_whoami, i2c_whoami_scl, i2c_whoami_sim};
 use virtual_bus::bus::i2c::sim::I2cPinModel;
-use virtual_bus::verilated::RawModel;
 
 /// I2C WHO_AM_I slave (address 0x29, 0x0F = 0xA5, 0x10 = SCRATCH).
 /// 50 MHz system clock
 pub struct VerilatedWhoAmI {
-    raw: RawModel,
+    m: i2c_whoami::Model,
 }
 
 impl VerilatedWhoAmI {
@@ -26,21 +25,21 @@ impl VerilatedWhoAmI {
     /// The RTL reset is asynchronous, so no clock is needed. Verilator initializes ports to 0, though,
     /// so `rst_n` is set to 1 and then to 0 to create a falling edge
     pub fn new() -> Self {
-        let mut raw = RawModel::new(&pins::VTABLE);
-        raw.set(pins::SCL, 1);
-        raw.set(pins::SDA_I, 1);
-        for level in [1, 0, 1] {
-            raw.set(pins::RST_N, level);
-            raw.eval();
+        let mut m = i2c_whoami::Model::new();
+        m.set_scl(true);
+        m.set_sda_i(true);
+        for level in [true, false, true] {
+            m.set_rst_n(level);
+            m.eval();
         }
-        Self { raw }
+        Self { m }
     }
 
     fn clock(&mut self) {
-        self.raw.set(pins::CLK, 0);
-        self.raw.eval();
-        self.raw.set(pins::CLK, 1);
-        self.raw.eval();
+        self.m.set_clk(false);
+        self.m.eval();
+        self.m.set_clk(true);
+        self.m.eval();
     }
 }
 
@@ -53,8 +52,8 @@ impl Default for VerilatedWhoAmI {
 impl I2cPinModel for VerilatedWhoAmI {
     fn set_inputs(&mut self, scl: bool, sda: bool) {
         // a synchronous circuit: evaluating on the system clock is enough
-        self.raw.set(pins::SCL, u64::from(scl));
-        self.raw.set(pins::SDA_I, u64::from(sda));
+        self.m.set_scl(scl);
+        self.m.set_sda_i(sda);
     }
 
     fn period_ps(&self) -> Option<u64> {
@@ -66,7 +65,7 @@ impl I2cPinModel for VerilatedWhoAmI {
     }
 
     fn sda_low(&self) -> bool {
-        self.raw.get_bit(pins::SDA_LOW)
+        self.m.sda_low()
     }
 }
 
@@ -81,7 +80,7 @@ impl I2cPinModel for VerilatedWhoAmI {
 /// While the power ([`Self::set_vdd`]) is off the chip is held in reset and does not ACK its address;
 /// the registers return to their reset values the moment power comes back
 pub struct VerilatedWhoAmITop {
-    raw: RawModel,
+    m: i2c_whoami_sim::Model,
     ext_low: bool,
 }
 
@@ -98,36 +97,33 @@ impl VerilatedWhoAmITop {
 
     /// Creates the model with power off
     pub fn new_unpowered() -> Self {
-        let mut raw = RawModel::new(&top_pins::VTABLE);
-        raw.set(top_pins::SCL, 1);
-        raw.set(top_pins::EXT_SDA_LOW, 0);
+        let mut m = i2c_whoami_sim::Model::new();
+        m.set_scl(true);
+        m.set_ext_sda_low(false);
         // move vdd 1 → 0 so the power-off reset surely happens (staying at the initial 0 gives no edge)
-        for level in [1, 0] {
-            raw.set(top_pins::VDD, level);
-            raw.eval();
+        for level in [true, false] {
+            m.set_vdd(level);
+            m.eval();
         }
-        Self {
-            raw,
-            ext_low: false,
-        }
+        Self { m, ext_low: false }
     }
 
     /// Turns the power (vdd) on / off. gnd is tied to 0 inside the wrapper
     pub fn set_vdd(&mut self, on: bool) {
-        self.raw.set(top_pins::VDD, u64::from(on));
-        self.raw.eval();
+        self.m.set_vdd(on);
+        self.m.eval();
     }
 
     fn clock(&mut self) {
-        self.raw.set(top_pins::CLK, 0);
-        self.raw.eval();
-        self.raw.set(top_pins::CLK, 1);
-        self.raw.eval();
+        self.m.set_clk(false);
+        self.m.eval();
+        self.m.set_clk(true);
+        self.m.eval();
     }
 
     /// The SDA level resolved inside the wrapper
     pub fn sda_level(&self) -> bool {
-        self.raw.get_bit(top_pins::SDA_LEVEL)
+        self.m.sda_level()
     }
 }
 
@@ -140,11 +136,11 @@ impl Default for VerilatedWhoAmITop {
 impl I2cPinModel for VerilatedWhoAmITop {
     fn set_inputs(&mut self, scl: bool, external_sda: bool) {
         self.ext_low = !external_sda;
-        self.raw.set(top_pins::SCL, u64::from(scl));
-        self.raw.set(top_pins::EXT_SDA_LOW, u64::from(self.ext_low));
+        self.m.set_scl(scl);
+        self.m.set_ext_sda_low(self.ext_low);
         // resolve the lines inside the wrapper (combinational logic) for the current levels.
         // This is not a clock edge, so the DUT's state does not change
-        self.raw.eval();
+        self.m.eval();
     }
 
     fn period_ps(&self) -> Option<u64> {
@@ -169,7 +165,7 @@ impl I2cPinModel for VerilatedWhoAmITop {
 /// Registers and behavior are the same as [`VerilatedWhoAmI`]. It is evaluated whenever a line changes,
 /// so it returns no `period_ps`
 pub struct VerilatedWhoAmIScl {
-    raw: RawModel,
+    m: i2c_whoami_scl::Model,
 }
 
 impl VerilatedWhoAmIScl {
@@ -178,14 +174,14 @@ impl VerilatedWhoAmIScl {
 
     /// Creates the model and resets it (`rst_n` 1 → 0 → 1)
     pub fn new() -> Self {
-        let mut raw = RawModel::new(&scl_pins::VTABLE);
-        raw.set(scl_pins::SCL, 1);
-        raw.set(scl_pins::SDA_I, 1);
-        for level in [1, 0, 1] {
-            raw.set(scl_pins::RST_N, level);
-            raw.eval();
+        let mut m = i2c_whoami_scl::Model::new();
+        m.set_scl(true);
+        m.set_sda_i(true);
+        for level in [true, false, true] {
+            m.set_rst_n(level);
+            m.eval();
         }
-        Self { raw }
+        Self { m }
     }
 }
 
@@ -197,13 +193,13 @@ impl Default for VerilatedWhoAmIScl {
 
 impl I2cPinModel for VerilatedWhoAmIScl {
     fn set_inputs(&mut self, scl: bool, sda: bool) {
-        self.raw.set(scl_pins::SCL, u64::from(scl));
-        self.raw.set(scl_pins::SDA_I, u64::from(sda));
-        self.raw.eval();
+        self.m.set_scl(scl);
+        self.m.set_sda_i(sda);
+        self.m.eval();
     }
 
     fn sda_low(&self) -> bool {
-        self.raw.get_bit(scl_pins::SDA_LOW)
+        self.m.sda_low()
     }
 }
 

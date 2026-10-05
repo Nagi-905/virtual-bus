@@ -32,10 +32,10 @@
 //!
 //! # Attaching Verilog
 //!
-//! 1. Call `virtual-bus-build` from `build.rs` with your RTL files and port list.
-//!    It runs Verilator and generates the code needed to call the model from Rust
-//! 2. Include the generated code and write a small adapter that reads and writes pins through
-//!    [`verilated::RawModel`]
+//! 1. Call `virtual-bus-build` from `build.rs` with your RTL files.
+//!    It runs Verilator and generates a `Model` per RTL, with a method per port read from the RTL
+//! 2. Include the generated code and write a small adapter that drives the model's ports
+//!    (`set_scl(true)`, `sda_low()`)
 //! 3. Implement [`bus::i2c::sim::I2cPinModel`] / [`bus::spi::sim::SpiPinModel`] for the adapter and
 //!    attach it to the signal lines
 //!

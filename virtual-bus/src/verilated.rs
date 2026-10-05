@@ -1,20 +1,27 @@
 //! Runtime support for models generated with Verilator.
 //!
-//! The build side is handled by the `virtual-bus-build` crate. When the user's `build.rs` lists the RTL and
-//! ports, it generates a C ABI glue layer (new / free / eval / set / get) and one Rust module per model
-//! (`VTABLE` and constants for the pin numbers).
-//! This module runs them as a [`RawModel`].
+//! The build side is handled by the `virtual-bus-build` crate. When the user's `build.rs` lists the RTL,
+//! it generates a C ABI glue layer (new / free / eval / set / get) and one Rust module per model.
+//! Each module has a typed `Model` (a method per port) built on [`RawModel`], plus `VTABLE` and
+//! pin-number constants for using [`RawModel`] directly.
 //!
 //! ```ignore
 //! mod bindings {
 //!     include!(concat!(env!("OUT_DIR"), "/verilated_models.rs"));
 //! }
-//! use bindings::spi_whoami as pins;
+//! use bindings::spi_whoami;
 //!
-//! let mut raw = virtual_bus::verilated::RawModel::new(&pins::VTABLE);
-//! raw.set(pins::CS_N, 1);
+//! // usually: the typed model
+//! let mut m = spi_whoami::Model::new();
+//! m.set_cs_n(true);
+//! m.eval();
+//! let oe = m.miso_oe();
+//!
+//! // or by pin number
+//! let mut raw = virtual_bus::verilated::RawModel::new(&spi_whoami::VTABLE);
+//! raw.set(spi_whoami::CS_N, 1);
 //! raw.eval();
-//! let oe = raw.get_bit(pins::MISO_OE);
+//! let oe = raw.get_bit(spi_whoami::MISO_OE);
 //! ```
 
 use core::ffi::c_void;

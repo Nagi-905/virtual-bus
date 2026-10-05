@@ -11,7 +11,8 @@ Drivers from crates.io work as they are. No board required: `cargo test` is enou
 
 ### Run your own Verilog together with your firmware
 
-List your RTL files and ports in `build.rs`, and your Rust drivers can talk to the RTL through Verilator.
+List your RTL files in `build.rs`, and your Rust drivers can talk to the RTL through Verilator.
+The ports are read from the RTL, and each becomes a typed method (`set_scl(true)`, `sda_low()`).
 No C++ testbench to write. Check firmware and RTL together before the chip exists.
 
 ### Check a Rust model and the RTL against the same tests

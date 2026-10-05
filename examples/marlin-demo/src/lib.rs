@@ -3,8 +3,8 @@
 //!
 //! What changes compared with `rtl-demo`:
 //!
-//! - No `build.rs` and no port list. `#[verilog]` reads the ports from the Verilog and turns them
-//!   into struct fields (`m.scl = 1`)
+//! - No `build.rs`. `#[verilog]` reads the ports from the Verilog and turns them into struct fields
+//!   (`m.scl = 1`)
 //! - Verilator runs when a model is first created, only for that model, and the result is cached
 //!   under `target/marlin`. Editing one RTL file rebuilds only the models that use it, without
 //!   recompiling any Rust

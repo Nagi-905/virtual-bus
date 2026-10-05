@@ -1,7 +1,8 @@
 //! A helper called from `build.rs`. Converts Verilog to C++ with Verilator, generates a C ABI glue layer
-//! and the Rust bindings (pin number constants and a `VTable`), and links them.
+//! and the Rust bindings, and links them.
 //!
-//! No hand-written C++ needed. To add a port, just add an `input` / `output` to the [`Model`].
+//! No hand-written C++ and no port list: the ports are read from what Verilator generates, so the
+//! bindings always match the RTL (including widths set by parameters such as `-GWIDTH=12`).
 //!
 //! ```ignore
 //! // build.rs
@@ -11,13 +12,7 @@
 //!         .model(
 //!             virtual_bus_build::Model::new("spi_whoami", "spi_whoami")
 //!                 .source("spi_whoami.v")
-//!                 .flag("-Wall")
-//!                 .input("rst_n", 1)
-//!                 .input("cs_n", 1)
-//!                 .input("sck", 1)
-//!                 .input("mosi", 1)
-//!                 .output("miso", 1)
-//!                 .output("miso_oe", 1),
+//!                 .flag("-Wall"),
 //!         )
 //!         .compile();
 //! }
@@ -28,13 +23,26 @@
 //! pub mod bindings {
 //!     include!(concat!(env!("OUT_DIR"), "/verilated_models.rs"));
 //! }
-//! // pass bindings::spi_whoami::VTABLE to virtual_bus::verilated::RawModel::new,
-//! // then read and write with pin numbers such as bindings::spi_whoami::CS_N
+//!
+//! let mut m = bindings::spi_whoami::Model::new();
+//! m.set_cs_n(true); // one setter per input
+//! m.eval();
+//! let driving = m.miso_oe(); // one getter per output
 //! ```
 //!
+//! Each model's module holds:
+//!
+//! - `Model`: the model with typed methods. `set_<input>(v)` for each input and `<output>()` for each
+//!   output; 1-bit ports are `bool`, wider ones `u8` / `u16` / `u32` / `u64`. Setters do not
+//!   evaluate; call `eval` after setting the inputs
+//! - `VTABLE` and one pin-number constant per port (`CS_N`, `MISO`, ...), for reading and writing
+//!   through `virtual_bus::verilated::RawModel` directly (`Model::raw_mut`)
+//!
+//! Supported top-level ports are inputs and outputs of 1 to 64 bits. `inout` ports and wider ports
+//! stop the build with a message; wrap the top in a module that splits them.
+//!
 //! Requirements: Verilator 5.x (`verilator` on PATH, or `VERILATOR_ROOT`) and a C++17 compiler.
-//! The using crate must depend on `virtual-bus` (the bindings refer to
-//! `virtual_bus::verilated::VTable`).
+//! The using crate must depend on `virtual-bus` (the bindings refer to `virtual_bus::verilated`).
 //!
 //! # Rebuilds
 //!
@@ -57,14 +65,6 @@ pub struct Model {
     top: String,
     sources: Vec<PathBuf>,
     flags: Vec<String>,
-    ports: Vec<Port>,
-}
-
-#[derive(Debug, Clone)]
-struct Port {
-    name: String,
-    width: u32,
-    input: bool,
 }
 
 impl Model {
@@ -83,7 +83,6 @@ impl Model {
             top: top.to_string(),
             sources: Vec::new(),
             flags: Vec::new(),
-            ports: Vec::new(),
         }
     }
 
@@ -93,33 +92,45 @@ impl Model {
         self
     }
 
-    /// Extra flags passed to verilator (`-Wall`, `-Wno-fatal` and so on)
+    /// Extra flags passed to verilator (`-Wall`, `-Wno-fatal`, `-GWIDTH=12` and so on)
     pub fn flag(mut self, flag: &str) -> Self {
         self.flags.push(flag.to_string());
         self
     }
+}
 
-    /// An input port, 1..=64 bits wide
-    pub fn input(self, name: &str, width: u32) -> Self {
-        self.port(name, width, true)
+/// A top-level port, as Verilator declares it in the model's header
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Port {
+    name: String,
+    msb: u32,
+    lsb: u32,
+    input: bool,
+}
+
+impl Port {
+    fn width(&self) -> u32 {
+        self.msb - self.lsb + 1
     }
 
-    /// An output port, 1..=64 bits wide
-    pub fn output(self, name: &str, width: u32) -> Self {
-        self.port(name, width, false)
+    /// The Rust type of the port's value
+    fn rust_type(&self) -> &'static str {
+        match self.width() {
+            1 => "bool",
+            2..=8 => "u8",
+            9..=16 => "u16",
+            17..=32 => "u32",
+            _ => "u64",
+        }
     }
 
-    fn port(mut self, name: &str, width: u32, input: bool) -> Self {
-        assert!(
-            (1..=64).contains(&width),
-            "port width must be 1..=64: {name}"
-        );
-        self.ports.push(Port {
-            name: name.to_string(),
-            width,
-            input,
-        });
-        self
+    /// How the port is written in Verilog, for docs: `scl`, `data[7:0]`
+    fn verilog(&self) -> String {
+        if self.width() == 1 && self.lsb == 0 {
+            self.name.clone()
+        } else {
+            format!("{}[{}:{}]", self.name, self.msb, self.lsb)
+        }
     }
 }
 
@@ -182,17 +193,19 @@ impl Verilated {
         });
 
         // the models first: they use the runtime
-        for lib in models.iter().chain([&runtime]) {
+        for (lib, _) in &models {
             println!("cargo::rustc-link-search=native={}", lib.dir.display());
             println!("cargo::rustc-link-lib=static={}", lib.name);
         }
+        println!("cargo::rustc-link-search=native={}", runtime.dir.display());
+        println!("cargo::rustc-link-lib=static={}", runtime.name);
         if let Some(stdlib) = tc.cxx_stdlib() {
             println!("cargo::rustc-link-lib={stdlib}");
         }
 
         let mut rs = String::from("// Generated by virtual-bus-build. Do not edit\n");
-        for m in &self.models {
-            rs.push_str(&bindings_rs(m));
+        for (m, (_, ports)) in self.models.iter().zip(&models) {
+            rs.push_str(&bindings_rs(&m.name, &m.top, ports));
         }
         fs::write(out.join("verilated_models.rs"), rs).unwrap();
     }
@@ -321,8 +334,9 @@ fn build_runtime(tc: &Toolchain, out: &Path, pkg: &str) -> Lib {
     lib
 }
 
-/// One model: verilator, the glue and its C++, unless nothing it depends on changed
-fn build_model(m: &Model, rtl: &Path, tc: &Toolchain, out: &Path, pkg: &str) -> Lib {
+/// One model: verilator, the glue and its C++, unless nothing it depends on changed.
+/// Returns the library and the model's ports
+fn build_model(m: &Model, rtl: &Path, tc: &Toolchain, out: &Path, pkg: &str) -> (Lib, Vec<Port>) {
     let dir = out.join("verilated").join(&m.name);
     let lib = Lib {
         dir: dir.clone(),
@@ -343,13 +357,24 @@ fn build_model(m: &Model, rtl: &Path, tc: &Toolchain, out: &Path, pkg: &str) -> 
         assert!(p.exists(), "RTL not found: {}", p.display());
         println!("cargo::rerun-if-changed={}", p.display());
     }
-    let glue = glue_cpp(m);
-    let settings = hash_str(&format!("{}{m:?}\n{sources:?}\n{glue}", tc.key));
+    let settings = hash_str(&format!("{}{m:?}\n{sources:?}\n", tc.key));
+    let header = dir.join(format!("Vvb_{}.h", m.name));
+    let glue_path = dir.join(format!("vb_{}_glue.cpp", m.name));
 
     if lib.exists() {
         if let Some(stamp) = Stamp::read(&dir).filter(|s| s.is_current(settings)) {
-            stamp.watch();
-            return lib;
+            // the glue is generated from the ports; if this crate now generates different glue,
+            // fall through and rebuild
+            let ports = fs::read_to_string(&header)
+                .ok()
+                .and_then(|h| parse_ports(&h).ok());
+            if let Some(ports) = ports {
+                let glue = fs::read_to_string(&glue_path).unwrap_or_default();
+                if glue == glue_cpp(&m.name, &ports) {
+                    stamp.watch();
+                    return (lib, ports);
+                }
+            }
         }
     }
 
@@ -368,7 +393,9 @@ fn build_model(m: &Model, rtl: &Path, tc: &Toolchain, out: &Path, pkg: &str) -> 
     let st = cmd.status().expect("failed to start verilator");
     assert!(st.success(), "verilator failed: {}", m.name);
 
-    fs::write(dir.join(format!("vb_{}_glue.cpp", m.name)), glue).unwrap();
+    let ports = parse_ports(&fs::read_to_string(&header).expect("verilator wrote no header"))
+        .unwrap_or_else(|e| panic!("model {} (top `{}`): {e}", m.name, m.top));
+    fs::write(&glue_path, glue_cpp(&m.name, &ports)).unwrap();
     let mut cc = tc.cc(&dir);
     cc.include(&dir).files(cpp_files(&dir)).compile(&lib.name);
 
@@ -377,7 +404,59 @@ fn build_model(m: &Model, rtl: &Path, tc: &Toolchain, out: &Path, pkg: &str) -> 
     let stamp = Stamp::new(settings, verilator_inputs(&depfile));
     stamp.write(&dir);
     stamp.watch();
-    lib
+    (lib, ports)
+}
+
+/// The top-level ports declared in a Verilator model header (`VL_IN8(&scl,0,0);` and so on)
+fn parse_ports(header: &str) -> Result<Vec<Port>, String> {
+    let mut ports = Vec::new();
+    for line in header.lines() {
+        let line = line.trim();
+        let Some((mac, rest)) = line.split_once('(') else {
+            continue;
+        };
+        let input = match mac {
+            "VL_IN8" | "VL_IN16" | "VL_IN" | "VL_IN64" => true,
+            "VL_OUT8" | "VL_OUT16" | "VL_OUT" | "VL_OUT64" => false,
+            "VL_INW" | "VL_OUTW" | "VL_INOUTW" | "VL_INOUT8" | "VL_INOUT16" | "VL_INOUT"
+            | "VL_INOUT64" => {
+                let name = rest.split(',').next().unwrap_or("").trim_start_matches('&');
+                return Err(if mac.ends_with('W') {
+                    format!(
+                        "port `{name}` is wider than 64 bits, which is not supported; \
+                         wrap the top in a module that splits it"
+                    )
+                } else {
+                    format!(
+                        "port `{name}` is an inout, which is not supported; wrap the top in a \
+                         module that splits it into an input and an output"
+                    )
+                });
+            }
+            _ => continue,
+        };
+        let args: Vec<&str> = rest
+            .split(')')
+            .next()
+            .unwrap_or("")
+            .split(',')
+            .map(str::trim)
+            .collect();
+        let [name, msb, lsb] = args[..] else {
+            return Err(format!("unexpected port declaration: {line}"));
+        };
+        let num = |s: &str| {
+            s.parse::<u32>()
+                .map_err(|_| format!("unexpected port declaration: {line}"))
+        };
+        ports.push(Port {
+            name: name.trim_start_matches('&').to_string(),
+            msb: num(msb)?,
+            lsb: num(lsb)?,
+            input,
+        });
+    }
+    Ok(ports)
 }
 
 /// The input files listed in Verilator's dependency file (`<outputs> : <inputs>`)
@@ -505,9 +584,9 @@ fn cpp_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// The C ABI glue (new / free / eval / set / get)
-fn glue_cpp(m: &Model) -> String {
-    let class = format!("Vvb_{}", m.name);
-    let n = &m.name;
+fn glue_cpp(name: &str, ports: &[Port]) -> String {
+    let class = format!("Vvb_{name}");
+    let n = name;
     let mut s = String::new();
     writeln!(s, "// Generated by virtual-bus-build. Do not edit").unwrap();
     writeln!(s, "#include <cstdint>").unwrap();
@@ -542,7 +621,7 @@ fn glue_cpp(m: &Model) -> String {
     .unwrap();
     writeln!(s, "  {class}& t = static_cast<Inst*>(p)->top;").unwrap();
     writeln!(s, "  switch (pin) {{").unwrap();
-    for (i, port) in m.ports.iter().enumerate() {
+    for (i, port) in ports.iter().enumerate() {
         if port.input {
             writeln!(s, "  case {i}: t.{} = v; break;", port.name).unwrap();
         }
@@ -557,7 +636,7 @@ fn glue_cpp(m: &Model) -> String {
     .unwrap();
     writeln!(s, "  {class}& t = static_cast<Inst*>(p)->top;").unwrap();
     writeln!(s, "  switch (pin) {{").unwrap();
-    for (i, port) in m.ports.iter().enumerate() {
+    for (i, port) in ports.iter().enumerate() {
         writeln!(s, "  case {i}: return t.{};", port.name).unwrap();
     }
     writeln!(s, "  default: return 0;").unwrap();
@@ -566,13 +645,58 @@ fn glue_cpp(m: &Model) -> String {
     s
 }
 
-/// Rust side: extern declarations, VTable, pin number constants
-fn bindings_rs(m: &Model) -> String {
-    let n = &m.name;
+/// Rust keywords that need `r#` to be used as a method name
+const KEYWORDS: &[&str] = &[
+    "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "do", "dyn",
+    "else", "enum", "extern", "false", "final", "fn", "for", "gen", "if", "impl", "in", "let",
+    "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub", "ref", "return",
+    "static", "struct", "trait", "true", "try", "type", "typeof", "unsafe", "unsized", "use",
+    "virtual", "where", "while", "yield",
+];
+
+/// A method name for `name`, as Rust code
+fn method_ident(name: &str) -> String {
+    if KEYWORDS.contains(&name) {
+        format!("r#{name}")
+    } else {
+        name.to_string()
+    }
+}
+
+/// Rust side: extern declarations, VTable, pin number constants and the typed `Model`
+fn bindings_rs(n: &str, top: &str, ports: &[Port]) -> String {
+    // every name the module defines must be unique
+    let mut items: Vec<String> = ["VTABLE", "Model"].map(String::from).to_vec();
+    let mut methods: Vec<String> = ["new", "eval", "raw", "raw_mut", "default"]
+        .map(String::from)
+        .to_vec();
+    for p in ports {
+        assert!(
+            !matches!(p.name.as_str(), "self" | "Self" | "super" | "crate" | "_"),
+            "model {n}: port `{}` cannot be used as a Rust name",
+            p.name
+        );
+        items.push(p.name.to_ascii_uppercase());
+        methods.push(if p.input {
+            format!("set_{}", p.name)
+        } else {
+            p.name.clone()
+        });
+    }
+    for names in [&items, &methods] {
+        for (i, a) in names.iter().enumerate() {
+            assert!(
+                !names[..i].contains(a),
+                "model {n}: the generated name `{a}` is used twice; rename a port"
+            );
+        }
+    }
+
     let mut s = String::new();
-    writeln!(s, "/// Generated bindings for `{}` (top `{}`)", n, m.top).unwrap();
+    writeln!(s, "/// Generated bindings for `{n}` (top `{top}`)").unwrap();
+    writeln!(s, "#[allow(dead_code)]").unwrap();
     writeln!(s, "pub mod {n} {{").unwrap();
-    writeln!(s, "    use ::virtual_bus::verilated::VTable;").unwrap();
+    writeln!(s, "    use ::virtual_bus::verilated::{{RawModel, VTable}};").unwrap();
     writeln!(s, "    use ::core::ffi::c_void;").unwrap();
     writeln!(s, "    unsafe extern \"C\" {{").unwrap();
     writeln!(s, "        fn vb_{n}_new() -> *mut c_void;").unwrap();
@@ -593,9 +717,15 @@ fn bindings_rs(m: &Model) -> String {
     writeln!(s, "        set: vb_{n}_set,").unwrap();
     writeln!(s, "        get: vb_{n}_get,").unwrap();
     writeln!(s, "    }};").unwrap();
-    for (i, port) in m.ports.iter().enumerate() {
+    for (i, port) in ports.iter().enumerate() {
         let dir = if port.input { "input" } else { "output" };
-        writeln!(s, "    /// {dir} `{}` ({} bit)", port.name, port.width).unwrap();
+        writeln!(
+            s,
+            "    /// {dir} `{}` ({} bit)",
+            port.verilog(),
+            port.width()
+        )
+        .unwrap();
         writeln!(
             s,
             "    pub const {}: u32 = {i};",
@@ -603,6 +733,92 @@ fn bindings_rs(m: &Model) -> String {
         )
         .unwrap();
     }
+
+    writeln!(
+        s,
+        "    /// The `{top}` model, with a setter per input and a getter per output"
+    )
+    .unwrap();
+    writeln!(s, "    pub struct Model {{").unwrap();
+    writeln!(s, "        raw: RawModel,").unwrap();
+    writeln!(s, "    }}").unwrap();
+    writeln!(s, "    impl Model {{").unwrap();
+    writeln!(
+        s,
+        "        /// Creates the model. Inputs start at 0 and nothing is evaluated yet"
+    )
+    .unwrap();
+    writeln!(s, "        pub fn new() -> Self {{").unwrap();
+    writeln!(s, "            Self {{ raw: RawModel::new(&VTABLE) }}").unwrap();
+    writeln!(s, "        }}").unwrap();
+    writeln!(
+        s,
+        "        /// Evaluates the model with the inputs set so far"
+    )
+    .unwrap();
+    writeln!(s, "        pub fn eval(&mut self) {{").unwrap();
+    writeln!(s, "            self.raw.eval()").unwrap();
+    writeln!(s, "        }}").unwrap();
+    writeln!(
+        s,
+        "        /// The untyped model, to access ports by pin number"
+    )
+    .unwrap();
+    writeln!(s, "        pub fn raw(&self) -> &RawModel {{").unwrap();
+    writeln!(s, "            &self.raw").unwrap();
+    writeln!(s, "        }}").unwrap();
+    writeln!(
+        s,
+        "        /// The untyped model, to access ports by pin number"
+    )
+    .unwrap();
+    writeln!(s, "        pub fn raw_mut(&mut self) -> &mut RawModel {{").unwrap();
+    writeln!(s, "            &mut self.raw").unwrap();
+    writeln!(s, "        }}").unwrap();
+    for port in ports {
+        let pin = port.name.to_ascii_uppercase();
+        let ty = port.rust_type();
+        let w = port.width();
+        if port.input {
+            writeln!(
+                s,
+                "        /// Sets input `{}` ({w} bit). Takes effect at the next `eval`",
+                port.verilog()
+            )
+            .unwrap();
+            writeln!(s, "        pub fn set_{}(&mut self, v: {ty}) {{", port.name).unwrap();
+            if ty != "bool" && w < 64 && Some(w) != ty[1..].parse().ok() {
+                writeln!(
+                    s,
+                    "            debug_assert!(u64::from(v) >> {w} == 0, \"`{}` is {w} bits wide: {{v:#x}}\");",
+                    port.name
+                )
+                .unwrap();
+            }
+            writeln!(s, "            self.raw.set({pin}, u64::from(v))").unwrap();
+            writeln!(s, "        }}").unwrap();
+        } else {
+            writeln!(s, "        /// Output `{}` ({w} bit)", port.verilog()).unwrap();
+            writeln!(
+                s,
+                "        pub fn {}(&self) -> {ty} {{",
+                method_ident(&port.name)
+            )
+            .unwrap();
+            if ty == "bool" {
+                writeln!(s, "            self.raw.get_bit({pin})").unwrap();
+            } else {
+                writeln!(s, "            self.raw.get({pin}) as {ty}").unwrap();
+            }
+            writeln!(s, "        }}").unwrap();
+        }
+    }
+    writeln!(s, "    }}").unwrap();
+    writeln!(s, "    impl Default for Model {{").unwrap();
+    writeln!(s, "        fn default() -> Self {{").unwrap();
+    writeln!(s, "            Self::new()").unwrap();
+    writeln!(s, "        }}").unwrap();
+    writeln!(s, "    }}").unwrap();
     writeln!(s, "}}").unwrap();
     s
 }
@@ -616,6 +832,105 @@ mod tests {
         let dir = env::temp_dir().join(format!("vb-build-test-{}-{name}", std::process::id()));
         reset_dir(&dir);
         dir
+    }
+
+    fn port(name: &str, msb: u32, lsb: u32, input: bool) -> Port {
+        Port {
+            name: name.into(),
+            msb,
+            lsb,
+            input,
+        }
+    }
+
+    /// As Verilator 5.052 writes it (ports grouped by type, not in declaration order)
+    const HEADER: &str = "
+class alignas(VL_CACHE_LINE_BYTES) Vt VL_NOT_FINAL : public VerilatedModel {
+  public:
+    VL_IN8(&clk,0,0);
+    VL_IN8(&data,7,0);
+    VL_IN8(&off,8,1);
+    VL_OUT8(&esc__021,0,0);
+    VL_OUT16(&type,15,0);
+    VL_IN(&word,31,0);
+    VL_IN64(&big,40,0);
+    VL_UNCOPYABLE(Vt);
+";
+
+    #[test]
+    fn reads_ports_from_the_header() {
+        assert_eq!(
+            parse_ports(HEADER).unwrap(),
+            [
+                port("clk", 0, 0, true),
+                port("data", 7, 0, true),
+                port("off", 8, 1, true),
+                port("esc__021", 0, 0, false),
+                port("type", 15, 0, false),
+                port("word", 31, 0, true),
+                port("big", 40, 0, true),
+            ]
+        );
+        let ports = parse_ports(HEADER).unwrap();
+        let types: Vec<_> = ports.iter().map(|p| (p.width(), p.rust_type())).collect();
+        assert_eq!(
+            types,
+            [
+                (1, "bool"),
+                (8, "u8"),
+                (8, "u8"),
+                (1, "bool"),
+                (16, "u16"),
+                (32, "u32"),
+                (41, "u64")
+            ]
+        );
+        assert_eq!(ports[2].verilog(), "off[8:1]");
+    }
+
+    #[test]
+    fn refuses_inout_and_wide_ports() {
+        let e = parse_ports("    VL_INOUT8(&sda,0,0);").unwrap_err();
+        assert!(e.contains("`sda` is an inout"), "{e}");
+        let e = parse_ports("    VL_OUTW(&wide,71,0,3);").unwrap_err();
+        assert!(e.contains("`wide` is wider than 64 bits"), "{e}");
+    }
+
+    #[test]
+    fn bindings_have_typed_methods() {
+        let rs = bindings_rs("t", "t", &parse_ports(HEADER).unwrap());
+        for expected in [
+            "pub const CLK: u32 = 0;",
+            "pub const BIG: u32 = 6;",
+            "pub fn set_clk(&mut self, v: bool)",
+            "pub fn set_off(&mut self, v: u8)",
+            "pub fn set_big(&mut self, v: u64)",
+            "debug_assert!(u64::from(v) >> 41 == 0",
+            "pub fn esc__021(&self) -> bool",
+            "pub fn r#type(&self) -> u16",
+            "self.raw.get(TYPE) as u16",
+        ] {
+            assert!(rs.contains(expected), "missing `{expected}` in\n{rs}");
+        }
+        // full-width ports need no range check
+        assert!(!rs.contains(">> 8 == 0"));
+        assert!(!rs.contains(">> 32 == 0"));
+    }
+
+    #[test]
+    #[should_panic(expected = "the generated name `set_clk` is used twice")]
+    fn name_clashes_are_reported() {
+        bindings_rs(
+            "t",
+            "t",
+            &[port("clk", 0, 0, true), port("set_clk", 0, 0, false)],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "the generated name `eval` is used twice")]
+    fn ports_cannot_shadow_model_methods() {
+        bindings_rs("t", "t", &[port("eval", 0, 0, false)]);
     }
 
     #[test]

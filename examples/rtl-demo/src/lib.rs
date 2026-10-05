@@ -1,7 +1,7 @@
 //! virtual-bus demo: model your own Verilog with Verilator and drive it with embedded-hal drivers.
 //!
 //! - `build.rs` calls `virtual-bus-build` to model the RTL in `../verilog/rtl`
-//! - [`bindings`] holds the generated bindings (pin number constants and `VTABLE`)
+//! - [`bindings`] holds the generated bindings: a `Model` per RTL with a method per port
 //! - each module is an adapter that attaches a generated model to virtual-bus's signal lines
 //!
 //! | Module | RTL | What it shows |
