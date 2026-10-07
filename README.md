@@ -2,44 +2,6 @@
 
 A Rust crate for running embedded-hal 1.0 I2C / SPI drivers against IC models on your PC, without real hardware.
 
-## Overview
-
-Your driver stays the same; only the layers under the embedded-hal traits are swapped.
-
-```mermaid
-flowchart TB
-    driver["Driver / application<br/>crates.io drivers or your own code, unchanged"]
-    hal["embedded-hal 1.0 traits<br/>I2c · SpiDevice · SpiBus · OutputPin · InputPin · DelayNs"]
-    driver --> hal
-
-    subgraph tx["Transaction level: fast"]
-        vbus["Virtual bus<br/>VirtualI2cBus / VirtualSpiDevice"]
-        rmodel["Rust model<br/>RegisterMap, or your own I2cSlave / SpiSlave"]
-        vbus --> rmodel
-    end
-
-    subgraph pin["Pin level: signals and timing"]
-        bitbang["Bit-bang master<br/>BitBangI2c / BitBangSpi"]
-        wires["Signal lines and simulated time<br/>SimI2cBus / SimSpiBus"]
-        pinmodel["Rust model on the lines<br/>PinLevelI2cSlave / PinLevelSpiSlave"]
-        rtl["RTL model<br/>your Verilog, via virtual-bus-build"]
-        bitbang --> wires
-        wires --> pinmodel
-        wires --> rtl
-    end
-
-    subgraph hw["Real hardware, for reference"]
-        master["I2C / SPI master peripheral"]
-        ic["Real IC"]
-        master --> ic
-    end
-
-    hal --> vbus
-    hal --> bitbang
-    hal -.-> master
-    vbus -. "attach_i2c: one address on the pin level" .-> bitbang
-```
-
 ## Features
 
 ### Test hardware-targeted code on your PC, unchanged
@@ -53,14 +15,12 @@ List your RTL files in `build.rs`, and your Rust drivers can talk to the RTL thr
 The ports are read from the RTL, and each becomes a typed method (`set_scl(true)`, `sda_low()`).
 No C++ testbench to write. Check firmware and RTL together before the chip exists.
 
+Run the same driver and the same tests against a model written in Rust and against the RTL:
+write the spec quickly in Rust, then check mechanically that the RTL behaves the same way.
+Both can also share one bus.
+
 When a test fails, look inside the RTL: add `.trace()` to the model in `build.rs` and call
 `open_vcd`, and every signal is written to a VCD at the bus's simulated time (open it in GTKWave).
-
-### Check a Rust model and the RTL against the same tests
-
-Run the same driver and the same tests against a model written in Rust and against the RTL.
-Write the spec quickly in Rust, then check mechanically that the RTL behaves the same way.
-Both can also share one bus.
 
 ### Reproduce situations that are hard to create on real hardware
 
@@ -69,11 +29,6 @@ Both can also share one bus.
 - With a power-on reset in your RTL, check that a power cycle brings registers back to their reset values
 
 Time is simulated, so every run gives the same result, including timing-dependent bugs.
-
-### Choose between speed and detail
-
-Use the fast byte-level path most of the time, and switch to the pin-level path only when you need to check timing.
-Both look the same to the driver (see the diagram in [Overview](#overview)).
 
 ## Usage
 
@@ -117,6 +72,9 @@ led.set_high().unwrap();
 
 // Check that the driver's operation reached the model
 assert!(model.borrow().pin(0));
+
+// Every I2C transaction the driver issued is recorded
+println!("{:02x?}", bus.log());
 ```
 
 ```sh
