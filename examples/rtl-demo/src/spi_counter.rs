@@ -118,11 +118,33 @@ impl SpiPinModel for SpiCounter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use embedded_hal::delay::DelayNs;
     use embedded_hal::spi::{MODE_0, SpiDevice};
     use embedded_hal_bus::spi::ExclusiveDevice;
     use virtual_bus::bus::SimDelay;
     use virtual_bus::bus::spi::sim::{SimCsPin, SimSpiBus, SimSpiMaster};
     use virtual_bus::{Shared, shared};
+
+    /// The whole flow at a glance: set COMPARE, start the counter with its interrupt,
+    /// wait a little, and `irq` rises. The tests after this one check each part in detail
+    #[test]
+    fn irq_rises_when_count_reaches_compare() {
+        let bus = SimSpiBus::new();
+        let mut delay = bus.delay();
+        // keep a handle to the model to read `irq`, which is not an SPI pin
+        let dut = shared(SpiCounter::new());
+        let cs = bus.add_device(dut.clone());
+        // at most about clk / 8 (6 MHz): the chip samples SCK with its 50 MHz clock
+        let spi = bus.master(MODE_0, 1_000_000).unwrap();
+        let mut dev = ExclusiveDevice::new(spi, cs, bus.delay()).unwrap();
+
+        assert!(!dut.borrow().irq());
+        dev.write(&[0x04, 0x0F]).unwrap(); // COMPARE = 15
+        dev.write(&[0x01, 0x05]).unwrap(); // CTRL = EN | IRQ_EN
+        // PRESCALE is 0: COUNT goes up every 20 ns and reaches 15 well within 1 µs
+        delay.delay_us(1);
+        assert!(dut.borrow().irq());
+    }
 
     type Dev = ExclusiveDevice<SimSpiMaster, SimCsPin, SimDelay>;
 

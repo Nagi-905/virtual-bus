@@ -92,6 +92,7 @@ For more, see the examples and the API documentation (`cargo doc --open`).
 
 ```sh
 cargo run -p virtual-bus --example register_map
+cargo run -p rtl-demo --example spi_counter    # drives the SPI RTL, writes target/spi_counter.vcd
 cargo test --workspace     # also runs the RTL demo
 ```
 

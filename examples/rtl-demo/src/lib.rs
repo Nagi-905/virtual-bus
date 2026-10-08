@@ -3,6 +3,8 @@
 //! - `build.rs` calls `virtual-bus-build` to model the RTL in `../verilog/rtl`
 //! - [`bindings`] holds the generated bindings: a `Model` per RTL with a method per port
 //! - each module is an adapter that attaches a generated model to virtual-bus's signal lines
+//! - `examples/spi_counter.rs` drives one from start to end
+//!   (`cargo run -p rtl-demo --example spi_counter`)
 //!
 //! | Module | RTL | What it shows |
 //! |---|---|---|
