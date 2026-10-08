@@ -262,11 +262,36 @@ impl SimSpiBus {
     /// and time is advanced by the missing amount before selecting.
     ///
     /// Independently of this, the bus always keeps CS deselected for one SCK period of the last
-    /// [`Self::master`]; that wait is not counted as a violation
+    /// [`Self::master`]; that wait is not counted as a violation.
+    ///
+    /// Not needed for frames to work. Use it to check a driver against a datasheet t_CSH longer
+    /// than one SCK period (for example a flash that needs tens of µs between commands): set the
+    /// datasheet value, run the driver, then assert that [`Self::cs_high_violations`] is 0.
+    /// A t_CSH shorter than one SCK period is always met by the bus's own wait
+    ///
+    /// ```
+    /// use embedded_hal::spi::{MODE_0, SpiDevice};
+    /// use embedded_hal_bus::spi::ExclusiveDevice;
+    /// use virtual_bus::bus::spi::sim::{PinLevelSpiSlave, SimSpiBus};
+    /// use virtual_bus::devices::register::{RegisterMap, SpiFormat};
+    ///
+    /// let regs = RegisterMap::new().rw(0x20, 0);
+    /// let bus = SimSpiBus::new();
+    /// bus.set_min_cs_high_ns(50_000); // the datasheet asks for 50 µs between frames
+    /// let cs = bus.add_device(PinLevelSpiSlave::new(regs.spi(SpiFormat::read_bit7_inc_bit6()), MODE_0));
+    /// let spi = bus.master(MODE_0, 1_000_000).unwrap();
+    /// let mut dev = ExclusiveDevice::new(spi, cs, bus.delay()).unwrap();
+    ///
+    /// dev.write(&[0x20, 0x01]).unwrap();
+    /// dev.write(&[0x20, 0x02]).unwrap(); // right away: only 1 µs of CS high
+    /// assert_eq!(bus.cs_high_violations(), 1); // this driver code does not wait long enough
+    /// ```
     pub fn set_min_cs_high_ns(&self, ns: u64) {
         self.world.borrow_mut().min_cs_high = ns * 1000;
     }
 
+    /// Number of times a device was selected again before the time set with
+    /// [`Self::set_min_cs_high_ns`] had passed
     pub fn cs_high_violations(&self) -> usize {
         self.world.borrow().cs_high_violations
     }

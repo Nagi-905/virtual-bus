@@ -72,4 +72,6 @@ Crate building blocks live only in `bus` and `devices`. Models of specific ICs l
   period of the last `master` before selecting again. Without it, `ExclusiveDevice` would deselect and select
   at the same moment, and a slave that synchronizes CS to a system clock would see all frames as one
 - **t_CSH**: `SimSpiBus::set_min_cs_high_ns` checks the minimum time between deselecting and selecting again.
-  If it is too short, it is counted as a violation and the bus waits for the rest
+  If it is too short, it is counted as a violation and the bus waits for the rest. Frames work without it;
+  use it to check that a driver meets a datasheet t_CSH longer than one SCK period (assert that
+  `cs_high_violations()` is 0)
