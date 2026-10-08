@@ -2,17 +2,18 @@
 //!
 //! Write the spec quickly as a Rust model, then check mechanically that the RTL behaves the same way.
 //! The same "WHO_AM_I chip" (address 0x29, 0x0F = 0xA5 read-only, 0x10 = SCRATCH read-write,
-//! the first written byte is the register pointer, auto-incrementing afterwards) is built in three ways:
+//! the first written byte is the register pointer, auto-incrementing afterwards) is built in four ways:
 //!
 //! 1. The Rust model (`RegisterMap`) attached at transaction level (`VirtualI2cBus`)
 //! 2. The same Rust model attached at pin level (`PinLevelI2cSlave` + `SimI2cBus`)
 //! 3. `i2c_whoami.v` modeled with Verilator
+//! 4. The chip top `i2c_whoami_top.v` (inout SDA), wrapped in a simulation wrapper
 //!
 //! The same tests run on all of them, and the results must match.
 
 use embedded_hal::i2c::{Error as _, ErrorKind, I2c, NoAcknowledgeSource};
 
-use rtl_demo::i2c_whoami::VerilatedWhoAmI;
+use rtl_demo::i2c_whoami::{VerilatedWhoAmI, VerilatedWhoAmITop};
 use virtual_bus::VirtualI2cBus;
 use virtual_bus::bus::i2c::sim::{I2cPinModel, PinLevelI2cSlave, SimI2cBus};
 use virtual_bus::devices::register::{I2cFormat, RegisterMap};
@@ -67,7 +68,7 @@ fn rust_model() -> Vec<u8> {
     conformance(&mut bus)
 }
 
-/// 2 to 5. Attach a model to the signal lines and drive it with the bit-bang master
+/// 2 to 4. Attach a model to the signal lines and drive it with the bit-bang master
 fn pin_level(model: impl I2cPinModel + 'static) -> Vec<u8> {
     let lines = SimI2cBus::new();
     lines.attach(model);
@@ -92,4 +93,9 @@ fn pin_level_rust_model_matches() {
 #[test]
 fn verilated_rtl_matches() {
     assert_eq!(pin_level(VerilatedWhoAmI::new()), rust_model());
+}
+
+#[test]
+fn verilated_chip_top_matches() {
+    assert_eq!(pin_level(VerilatedWhoAmITop::new()), rust_model());
 }

@@ -34,9 +34,9 @@ runtime of the other. Before 1.0, a breaking change raises the minor version.
 
 ### Removed
 
-- From `examples/`: the system-clock I2C slave, `spi_whoami.v`, the chip tops without output enable and
-  their simulation wrappers, the hand-ported SPI pin model, and `marlin-demo`. One I2C and one SPI
-  sample remain (b1959da)
+- From `examples/`: the system-clock I2C slave, `spi_whoami.v` and its chip top, the hand-ported SPI
+  pin model, and `marlin-demo`. One I2C and one SPI sample remain; the I2C chip top (`inout` pad,
+  power-on reset) is kept, now around the SCL-only slave (b1959da and the commit after it)
 
 ## 0.1.0 (2026-10-05)
 

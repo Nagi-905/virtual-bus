@@ -1,4 +1,5 @@
-// Unit testbench for i2c_whoami (Icarus Verilog)
+// Unit testbench for i2c_whoami (Icarus Verilog).
+// With -DUSE_TOP it tests the chip top i2c_whoami_top instead (inout SDA, power-on reset from vdd)
 `timescale 1ns / 1ps
 `default_nettype none
 
@@ -6,11 +7,22 @@ module tb_i2c_whoami;
 
   localparam integer QUARTER = 625;  // 400 kHz
 
-  reg rst_n = 1'b0;
+  reg rst_n = 1'b0;  // the reset pin for the core, vdd (power) for the top
   reg m_scl_low = 1'b0;
   reg m_sda_low = 1'b0;
   wire scl = ~m_scl_low;
 
+`ifdef USE_TOP
+  // chip top without output enable. SDA is resolved on a line with a pull-up
+  tri1 sda;
+  assign sda = m_sda_low ? 1'b0 : 1'bz;
+  i2c_whoami_top dut (
+      .vdd(rst_n),
+      .gnd(1'b0),
+      .scl(scl),
+      .sda(sda)
+  );
+`else
   // open drain: SDA is low if the master or the slave pulls it
   wire s_sda_low;
   wire sda = ~(m_sda_low | s_sda_low);
@@ -20,6 +32,7 @@ module tb_i2c_whoami;
       .sda_i(sda),
       .sda_low(s_sda_low)
   );
+`endif
 
   integer errors = 0;
 
@@ -152,7 +165,7 @@ module tb_i2c_whoami;
       errors = errors + 1;
     end
 
-    // no response in reset
+    // no response in reset (power off for the top)
     rst_n = 1'b0;
     #200;
     i2c_start;
@@ -163,7 +176,7 @@ module tb_i2c_whoami;
       errors = errors + 1;
     end
 
-    // after reset, SCRATCH is back to 0
+    // after reset (a power cycle for the top), SCRATCH is back to 0
     rst_n = 1'b1;
     #1000;
     read_reg(8'h10, d0, ack);
@@ -172,7 +185,11 @@ module tb_i2c_whoami;
       errors = errors + 1;
     end
 
+`ifdef USE_TOP
+    if (errors == 0) $display("PASS tb_i2c_whoami (chip top)");
+`else
     if (errors == 0) $display("PASS tb_i2c_whoami");
+`endif
     $finish;
   end
 

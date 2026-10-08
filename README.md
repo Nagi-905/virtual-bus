@@ -90,7 +90,7 @@ For more, see the examples and the API documentation (`cargo doc --open`).
 | `virtual-bus/examples/register_map.rs` | Attach a register-list model to virtual I2C and SPI buses |
 | `virtual-bus/examples/pin_level.rs` | Drive the signal lines with bit-bang masters, and what happens when SPI modes don't match |
 | `virtual-bus/examples/mcp23017/` | Write your own IC model and drive it with a driver from crates.io |
-| `examples/rtl-demo/` | Turn the sample Verilog (`examples/verilog/`) into models with Verilator and attach them: an I2C slave running on SCL / SDA only, and an SPI timer on a system clock with VCD waveforms |
+| `examples/rtl-demo/` | Turn the sample Verilog (`examples/verilog/`) into models with Verilator and attach them: an I2C slave running on SCL / SDA only (also as a chip top with an `inout` pad and a power-on reset), and an SPI timer on a system clock with VCD waveforms |
 
 ```sh
 cargo run -p virtual-bus --example register_map

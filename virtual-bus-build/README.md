@@ -54,8 +54,12 @@ embedded-hal-bus = { version = "0.3", features = ["std"] }   # ExclusiveDevice f
   endmodule
   ```
 
+  The complete example is `examples/verilog/rtl/i2c_whoami_top.v`, its wrapper `sim/i2c_whoami_sim.v` and
+  the adapter `VerilatedWhoAmITop` in `examples/rtl-demo/src/i2c_whoami.rs`
+
 - **Power pins are ordinary inputs.** A `vdd` input that drives a power-on reset inside the RTL can be
-  toggled from a test like any other port (`set_vdd(false)`, `eval`, `set_vdd(true)`)
+  toggled from a test like any other port (`set_vdd(false)`, `eval`, `set_vdd(true)`); see the
+  power-cycle tests in `examples/rtl-demo/src/i2c_whoami.rs`
 - Lint first: `verilator --lint-only -Wall rtl/my_chip.v --top-module my_chip`
 
 ## 3. List the RTL in `build.rs`
@@ -171,8 +175,8 @@ impl SpiPinModel for MyChip {
 }
 ```
 
-Full adapters: `examples/rtl-demo/src/i2c_whoami.rs` (SCL / SDA only) and
-`examples/rtl-demo/src/spi_counter.rs` (system clock, `irq`, VCD).
+Full adapters: `examples/rtl-demo/src/i2c_whoami.rs` (SCL / SDA only, and a chip top with an `inout` pad)
+and `examples/rtl-demo/src/spi_counter.rs` (system clock, `irq`, VCD).
 
 ## 6. Test it with a driver
 
