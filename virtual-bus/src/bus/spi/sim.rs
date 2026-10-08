@@ -64,8 +64,8 @@ struct Dev {
     polarity: CsPolarity,
     /// Logical value. False while selected
     cs_n: bool,
-    /// When the device was last deselected
-    deselected_since: u64,
+    /// When the device was last deselected. `None` until it has been selected once
+    deselected_since: Option<u64>,
     period: Option<u64>,
     next: u64,
 }
@@ -77,7 +77,10 @@ struct World {
     devs: Vec<Dev>,
     contentions: usize,
     in_contention: bool,
+    /// t_CSH set by the user (ps). Shorter idle times are violations
     min_cs_high: u64,
+    /// CS high time the bus always keeps (ps): one SCK period of the last master
+    default_cs_high: u64,
     cs_high_violations: usize,
 }
 
@@ -170,6 +173,7 @@ impl SimSpiBus {
                 contentions: 0,
                 in_contention: false,
                 min_cs_high: 0,
+                default_cs_high: 0,
                 cs_high_violations: 0,
             })),
         }
@@ -197,7 +201,7 @@ impl SimSpiBus {
             model,
             polarity,
             cs_n: true,
-            deselected_since: now,
+            deselected_since: None,
             period,
             next: now + period.unwrap_or(0),
         });
@@ -232,21 +236,33 @@ impl SimSpiBus {
         SimDelay::new(Rc::new(move |ps| w.borrow_mut().advance(ps)))
     }
 
-    /// A bit-bang SPI master on these lines
+    /// A bit-bang SPI master on these lines.
+    ///
+    /// From now on the bus keeps CS deselected for at least one SCK period of this master
+    /// before selecting a device again. Pin writes take no simulated time, so without this
+    /// `ExclusiveDevice` would deselect and select again at the same moment, and a slave that
+    /// synchronizes CS to a system clock would never see the frames end
     pub fn master(&self, mode: Mode, freq_hz: u32) -> Result<SimSpiMaster, ErrorKind> {
-        BitBangSpi::new(
+        let spi = BitBangSpi::new(
             self.sck_pin(),
             self.mosi_pin(),
             self.miso_pin(),
             self.delay(),
             mode,
             freq_hz,
-        )
+        )?;
+        // the same rounding as the master's half period
+        let half_ns = u64::from((1_000_000_000 / freq_hz / 2).max(1));
+        self.world.borrow_mut().default_cs_high = 2 * half_ns * 1000;
+        Ok(spi)
     }
 
     /// Minimum CS deselect time (t_CSH; the high time for active-low CS). Selecting again before
     /// this time has passed since deselecting is counted as a violation ([`Self::cs_high_violations`]),
-    /// and time is advanced by the missing amount before selecting
+    /// and time is advanced by the missing amount before selecting.
+    ///
+    /// Independently of this, the bus always keeps CS deselected for one SCK period of the last
+    /// [`Self::master`]; that wait is not counted as a violation
     pub fn set_min_cs_high_ns(&self, ns: u64) {
         self.world.borrow_mut().min_cs_high = ns * 1000;
     }
@@ -344,18 +360,23 @@ impl SimCsPin {
         let d = &w.devs[self.index];
         let select = d.polarity.is_selected(level);
         if select && d.cs_n {
-            let idle_for = w.now - d.deselected_since;
-            if idle_for < w.min_cs_high {
-                w.cs_high_violations += 1;
-                let wait = w.min_cs_high - idle_for;
-                w.advance(wait);
+            // a device that has never been selected has been idle for ever
+            if let Some(since) = d.deselected_since {
+                let idle_for = w.now - since;
+                if idle_for < w.min_cs_high {
+                    w.cs_high_violations += 1;
+                }
+                let required = w.min_cs_high.max(w.default_cs_high);
+                if idle_for < required {
+                    w.advance(required - idle_for);
+                }
             }
             w.devs[self.index].cs_n = false;
         } else if !select && !d.cs_n {
             let now = w.now;
             let d = &mut w.devs[self.index];
             d.cs_n = true;
-            d.deselected_since = now;
+            d.deselected_since = Some(now);
         }
         w.propagate();
     }
@@ -564,6 +585,62 @@ mod tests {
         bus.run_ns(300);
         cs.set_low().unwrap();
         assert_eq!(bus.cs_high_violations(), 1);
+    }
+
+    #[test]
+    fn back_to_back_transfers_keep_cs_high_for_one_sck_period() {
+        /// Samples CS on a 50 MHz system clock, like a slave with a synchronizer
+        struct CsSampler {
+            cs_n: bool,
+            /// (time of the tick, sampled cs_n) whenever the sampled value changes
+            edges: Rc<RefCell<Vec<(u64, bool)>>>,
+            sampled: bool,
+            now: u64,
+        }
+        impl SpiPinModel for CsSampler {
+            fn set_inputs(&mut self, cs_n: bool, _: bool, _: bool) {
+                self.cs_n = cs_n;
+            }
+            fn period_ps(&self) -> Option<u64> {
+                Some(20_000)
+            }
+            fn tick(&mut self) {
+                if self.cs_n != self.sampled {
+                    self.sampled = self.cs_n;
+                    self.edges.borrow_mut().push((self.now, self.cs_n));
+                }
+            }
+            fn miso(&self) -> Option<bool> {
+                None
+            }
+            fn set_time_ps(&mut self, now_ps: u64) {
+                self.now = now_ps;
+            }
+        }
+        let edges = Rc::new(RefCell::new(Vec::new()));
+        let bus = SimSpiBus::new();
+        let cs = bus.add_device(CsSampler {
+            cs_n: true,
+            edges: edges.clone(),
+            sampled: true,
+            now: 0,
+        });
+        let spi = bus.master(MODE_0, 1_000_000).unwrap();
+        let mut dev = ExclusiveDevice::new(spi, cs, bus.delay()).unwrap();
+        for _ in 0..3 {
+            dev.write(&[0x00]).unwrap();
+        }
+        bus.run_ns(100);
+
+        // three separate frames: low, high, low, high, low, high
+        let levels: Vec<bool> = edges.borrow().iter().map(|e| e.1).collect();
+        assert_eq!(levels, [false, true, false, true, false, true]);
+        // each gap is one SCK period (1 µs), give or take a system clock period
+        for w in edges.borrow().windows(2).filter(|w| w[0].1) {
+            assert!((w[1].0 - w[0].0).abs_diff(1_000_000) <= 20_000, "{w:?}");
+        }
+        // the bus's own wait is not a t_CSH violation
+        assert_eq!(bus.cs_high_violations(), 0);
     }
 
     #[test]
