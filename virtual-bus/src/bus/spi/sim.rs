@@ -79,8 +79,9 @@ struct World {
     in_contention: bool,
     /// t_CSH set by the user (ps). Shorter idle times are violations
     min_cs_high: u64,
-    /// CS high time the bus always keeps (ps): one SCK period of the last master
-    default_cs_high: u64,
+    /// CS high time the bus always keeps between frames (ps), like a real master's gap.
+    /// Set by `master` to one SCK period, or by `set_cs_high_ns`
+    cs_high: u64,
     cs_high_violations: usize,
 }
 
@@ -173,7 +174,7 @@ impl SimSpiBus {
                 contentions: 0,
                 in_contention: false,
                 min_cs_high: 0,
-                default_cs_high: 0,
+                cs_high: 0,
                 cs_high_violations: 0,
             })),
         }
@@ -238,10 +239,8 @@ impl SimSpiBus {
 
     /// A bit-bang SPI master on these lines.
     ///
-    /// From now on the bus keeps CS deselected for at least one SCK period of this master
-    /// before selecting a device again. Pin writes take no simulated time, so without this
-    /// `ExclusiveDevice` would deselect and select again at the same moment, and a slave that
-    /// synchronizes CS to a system clock would never see the frames end
+    /// Also sets the CS high time between frames to one SCK period of this master
+    /// ([`Self::set_cs_high_ns`]), so frames sent through `ExclusiveDevice` stay apart
     pub fn master(&self, mode: Mode, freq_hz: u32) -> Result<SimSpiMaster, ErrorKind> {
         let spi = BitBangSpi::new(
             self.sck_pin(),
@@ -253,16 +252,28 @@ impl SimSpiBus {
         )?;
         // the same rounding as the master's half period
         let half_ns = u64::from((1_000_000_000 / freq_hz / 2).max(1));
-        self.world.borrow_mut().default_cs_high = 2 * half_ns * 1000;
+        self.set_cs_high_ns(2 * half_ns);
         Ok(spi)
+    }
+
+    /// The time the bus keeps CS deselected between frames, as a real SPI master leaves a gap.
+    /// Selecting a device again sooner advances time by the rest first; this is not a violation.
+    ///
+    /// Pin writes take no simulated time, so without a gap `ExclusiveDevice` deselects and selects
+    /// at the same moment: a slave that synchronizes CS to a system clock never sees the frame end,
+    /// and the VCD shows CS staying low. [`Self::master`] sets this to one SCK period. Call it
+    /// yourself when you build a master from [`Self::sck_pin`] and the other pins, or to model
+    /// a master with a longer gap. The last call wins; it is 0 until then
+    pub fn set_cs_high_ns(&self, ns: u64) {
+        self.world.borrow_mut().cs_high = ns * 1000;
     }
 
     /// Minimum CS deselect time (t_CSH; the high time for active-low CS). Selecting again before
     /// this time has passed since deselecting is counted as a violation ([`Self::cs_high_violations`]),
     /// and time is advanced by the missing amount before selecting.
     ///
-    /// Independently of this, the bus always keeps CS deselected for one SCK period of the last
-    /// [`Self::master`]; that wait is not counted as a violation.
+    /// This is the slave's requirement; [`Self::set_cs_high_ns`] is the gap the master leaves
+    /// anyway (one SCK period with [`Self::master`]), and waiting for that is not a violation.
     ///
     /// Not needed for frames to work. Use it to check a driver against a datasheet t_CSH longer
     /// than one SCK period (for example a flash that needs tens of µs between commands): set the
@@ -391,7 +402,7 @@ impl SimCsPin {
                 if idle_for < w.min_cs_high {
                     w.cs_high_violations += 1;
                 }
-                let required = w.min_cs_high.max(w.default_cs_high);
+                let required = w.min_cs_high.max(w.cs_high);
                 if idle_for < required {
                     w.advance(required - idle_for);
                 }
@@ -666,6 +677,35 @@ mod tests {
         }
         // the bus's own wait is not a t_CSH violation
         assert_eq!(bus.cs_high_violations(), 0);
+    }
+
+    #[test]
+    fn a_hand_built_master_gets_the_gap_from_set_cs_high_ns() {
+        // CS high time between two back-to-back frames on a master built from the pins
+        let gap_ns = |set: Option<u64>| {
+            let bus = SimSpiBus::new();
+            if let Some(ns) = set {
+                bus.set_cs_high_ns(ns);
+            }
+            let cs = bus.add_device(whoami_pin());
+            let spi = BitBangSpi::new(
+                bus.sck_pin(),
+                bus.mosi_pin(),
+                bus.miso_pin(),
+                bus.delay(),
+                MODE_0,
+                1_000_000,
+            )
+            .unwrap();
+            let mut dev = ExclusiveDevice::new(spi, cs, bus.delay()).unwrap();
+            dev.write(&[0x20, 0x01]).unwrap();
+            let deselected = bus.now_ns();
+            dev.write(&[0x20, 0x02]).unwrap();
+            // the second frame is 16 SCK periods of 1 µs
+            bus.now_ns() - deselected - 16_000
+        };
+        assert_eq!(gap_ns(None), 0);
+        assert_eq!(gap_ns(Some(1_000)), 1_000);
     }
 
     #[test]

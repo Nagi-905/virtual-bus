@@ -68,9 +68,11 @@ Crate building blocks live only in `bus` and `devices`. Models of specific ICs l
 
 - **Polarity**: `add_device_with` accepts `CsPolarity::ActiveHigh`. Models always get a logical `cs_n`; the bus
   converts it. Wrap the CS pin in `InvertedPin` before handing it to `ExclusiveDevice` or a driver
-- **CS high time**: pin writes take no simulated time, so the bus keeps CS deselected for at least one SCK
-  period of the last `master` before selecting again. Without it, `ExclusiveDevice` would deselect and select
-  at the same moment, and a slave that synchronizes CS to a system clock would see all frames as one
+- **CS high time**: pin writes take no simulated time, so the bus leaves a gap between frames
+  (`SimSpiBus::set_cs_high_ns`), as a real master does. Without it, `ExclusiveDevice` would deselect and select
+  at the same moment, and a slave that synchronizes CS to a system clock would see all frames as one.
+  `master()` sets the gap to one SCK period; if you build a `BitBangSpi` from the pins yourself, call
+  `set_cs_high_ns`
 - **t_CSH**: `SimSpiBus::set_min_cs_high_ns` checks the minimum time between deselecting and selecting again.
   If it is too short, it is counted as a violation and the bus waits for the rest. Frames work without it;
   use it to check that a driver meets a datasheet t_CSH longer than one SCK period (assert that
