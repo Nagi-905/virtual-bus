@@ -11,9 +11,11 @@ Drivers from crates.io work as they are. No board required: `cargo test` is enou
 
 ### Run your own Verilog together with your firmware
 
-List your RTL files in `build.rs`, and your Rust drivers can talk to the RTL through Verilator.
+List your RTL files in `build.rs`, and Verilator turns them into Rust models.
 The ports are read from the RTL, and each becomes a typed method (`set_scl(true)`, `sda_low()`).
+A small adapter connects those ports to the simulated bus, and your Rust drivers talk to the RTL.
 No C++ testbench to write. Check firmware and RTL together before the chip exists.
+The step-by-step guide is in [`virtual-bus-build/README.md`](virtual-bus-build/README.md).
 
 Run the same driver and the same tests against a model written in Rust and against the RTL:
 write the spec quickly in Rust, then check mechanically that the RTL behaves the same way.

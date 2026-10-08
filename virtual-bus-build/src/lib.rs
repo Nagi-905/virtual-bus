@@ -4,6 +4,9 @@
 //! No hand-written C++ and no port list: the ports are read from what Verilator generates, so the
 //! bindings always match the RTL (including widths set by parameters such as `-GWIDTH=12`).
 //!
+//! The whole flow, from preparing the RTL to the adapter and the tests, is in this crate's
+//! `README.md`. The summary:
+//!
 //! ```ignore
 //! // build.rs
 //! fn main() {

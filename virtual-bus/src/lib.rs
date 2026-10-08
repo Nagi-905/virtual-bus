@@ -39,7 +39,8 @@
 //! 3. Implement [`bus::i2c::sim::I2cPinModel`] / [`bus::spi::sim::SpiPinModel`] for the adapter and
 //!    attach it to the signal lines
 //!
-//! See `examples/rtl-demo` in the repository for a working example.
+//! The step-by-step guide is `virtual-bus-build/README.md` in the repository, and
+//! `examples/rtl-demo` is a working example.
 //! With [`VirtualI2cBus::attach_i2c`], Rust models and RTL can share one bus.
 
 pub mod bus;

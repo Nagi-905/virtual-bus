@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.85"
 description = "build.rs helper that turns Verilog into a Verilator model usable from virtual-bus"
 license = "MIT"
+readme = "README.md"
 publish = false
 
 [dependencies]
