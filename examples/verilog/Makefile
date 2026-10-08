@@ -20,6 +20,7 @@ lint:
 	verilator --lint-only -Wall $(RTL)/spi_whoami.v --top-module spi_whoami
 	verilator --lint-only -Wall $(RTL)/spi_whoami.v $(RTL)/spi_whoami_top.v --top-module spi_whoami_top
 	verilator --lint-only -Wall $(RTL)/spi_whoami.v $(RTL)/spi_whoami_top.v $(RTL)/sim/spi_whoami_sim.v --top-module spi_whoami_sim
+	verilator --lint-only -Wall $(RTL)/spi_counter.v --top-module spi_counter
 
 SIMS := tb_i2c_whoami tb_i2c_whoami_top tb_i2c_whoami_scl tb_spi_whoami tb_spi_whoami_top
 

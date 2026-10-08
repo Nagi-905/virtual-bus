@@ -45,5 +45,13 @@ fn main() {
                 .source("spi_whoami.v")
                 .flag("-Wall"),
         )
+        // SPI: a timer / counter on a system clock, sampling SCK / CS_N / MOSI with it
+        .model(
+            Model::new("spi_counter", "spi_counter")
+                .source("spi_counter.v")
+                .flag("-Wall")
+                // can write a VCD (`with_vcd`)
+                .trace(),
+        )
         .compile();
 }

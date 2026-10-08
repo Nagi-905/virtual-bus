@@ -10,6 +10,7 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 
 use rtl_demo::bindings::i2c_whoami_scl;
 use rtl_demo::i2c_whoami::VerilatedWhoAmI;
+use rtl_demo::spi_counter::SpiCounter;
 use rtl_demo::spi_whoami::VerilatedSpiWhoAmI;
 use virtual_bus::bus::i2c::sim::{I2cPinModel, LineEvent, SimI2cBus};
 use virtual_bus::bus::spi::sim::SimSpiBus;
@@ -171,6 +172,37 @@ fn spi_vcd_has_internal_state() {
     assert_eq!(sck_rises, 16);
     // signals inside the module are there as well, not just the ports
     assert!(vcd.changes.len() > 6, "{:?}", vcd.changes.keys());
+}
+
+#[test]
+fn back_to_back_frames_show_cs_high_in_the_vcd() {
+    let file = path("spi_counter.vcd");
+    let bus = SimSpiBus::new();
+    let cs = bus.add_device(SpiCounter::with_vcd(&file).unwrap());
+    let spi = bus.master(MODE_0, 1_000_000).unwrap();
+    let mut dev = ExclusiveDevice::new(spi, cs, bus.delay()).unwrap();
+    // PRESCALE = 0, then EN, then read COUNT: three frames with no wait in between
+    dev.write(&[SpiCounter::REG_PRESCALE, 0]).unwrap();
+    dev.write(&[SpiCounter::REG_CTRL, SpiCounter::CTRL_EN])
+        .unwrap();
+    let mut b = [0x80 | SpiCounter::REG_COUNT, 0];
+    dev.transfer_in_place(&mut b).unwrap();
+    drop((dev, bus));
+
+    let vcd = Vcd::read(&file);
+    // cs_n: initial 1, then 0 / 1 for each of the three frames
+    let cs_n: Vec<&str> = vcd.changes["cs_n"].iter().map(|c| c.1.as_str()).collect();
+    assert_eq!(cs_n, ["1", "0", "1", "0", "1", "0", "1"]);
+    // each high between frames lasts one SCK period (1 µs)
+    let t: Vec<u64> = vcd.changes["cs_n"].iter().map(|c| c.0).collect();
+    assert_eq!(t[3] - t[2], 1_000_000);
+    assert_eq!(t[5] - t[4], 1_000_000);
+    // the counter, enabled in the second frame, moves while CS is high before the third
+    let counting = vcd.changes["count"]
+        .iter()
+        .filter(|c| (t[4]..t[5]).contains(&c.0))
+        .count();
+    assert_eq!(counting, 50, "one count per 20 ns system clock for 1 µs");
 }
 
 #[test]
