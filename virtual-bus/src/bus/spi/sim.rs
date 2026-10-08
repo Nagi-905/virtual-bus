@@ -1,9 +1,9 @@
 //! Pin-level SPI signal lines (SCK / MOSI / MISO and one CS per device) and simulated time.
 //!
-//! - Models clocked directly by SCK (such as `spi_whoami.v`) are evaluated in
-//!   [`SpiPinModel::set_inputs`] whenever a pin changes
-//! - Models running on a system clock (such as ICs that synchronize SCK to a system clock) return
-//!   [`SpiPinModel::period_ps`] and get [`SpiPinModel::tick`] as time advances
+//! - Models clocked directly by SCK are evaluated in [`SpiPinModel::set_inputs`] whenever a pin changes
+//! - Models running on a system clock (such as ICs that synchronize SCK to a system clock, like
+//!   `spi_counter.v` in the examples) return [`SpiPinModel::period_ps`] and get [`SpiPinModel::tick`]
+//!   as time advances
 //!
 //! MISO is pulled up to 1 when nobody drives it. Two or more drivers at once are counted
 //! as contention ([`SimSpiBus::contentions`]), and low wins.

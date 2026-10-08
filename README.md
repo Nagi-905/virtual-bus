@@ -88,13 +88,11 @@ For more, see the examples and the API documentation (`cargo doc --open`).
 | `virtual-bus/examples/register_map.rs` | Attach a register-list model to virtual I2C and SPI buses |
 | `virtual-bus/examples/pin_level.rs` | Drive the signal lines with bit-bang masters, and what happens when SPI modes don't match |
 | `virtual-bus/examples/mcp23017/` | Write your own IC model and drive it with a driver from crates.io |
-| `examples/rtl-demo/` | Turn the sample Verilog (`examples/verilog/`) into models with Verilator and attach them |
-| `examples/marlin-demo/` | Load the same Verilog with [Marlin](https://github.com/ethanuppal/marlin) instead, and dump VCD waveforms |
+| `examples/rtl-demo/` | Turn the sample Verilog (`examples/verilog/`) into models with Verilator and attach them: an I2C slave running on SCL / SDA only, and an SPI timer on a system clock with VCD waveforms |
 
 ```sh
 cargo run -p virtual-bus --example register_map
-cargo test --workspace     # also runs the RTL demos
-cargo run -p marlin-demo --example i2c_wave    # writes target/i2c_whoami.vcd
+cargo test --workspace     # also runs the RTL demo
 ```
 
 ## Crates
@@ -107,7 +105,7 @@ cargo run -p marlin-demo --example i2c_wave    # writes target/i2c_whoami.vcd
 ## Requirements
 
 - Rust 1.85 or later
-- For Verilog models: Verilator 5.x and a C++17 compiler (5.025 or later for Marlin)
+- For Verilog models: Verilator 5.x and a C++17 compiler
 
 Tested on Linux (including WSL2).
 

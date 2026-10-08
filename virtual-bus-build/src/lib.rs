@@ -10,8 +10,8 @@
 //!     virtual_bus_build::Verilated::new()
 //!         .rtl_dir("rtl")
 //!         .model(
-//!             virtual_bus_build::Model::new("spi_whoami", "spi_whoami")
-//!                 .source("spi_whoami.v")
+//!             virtual_bus_build::Model::new("spi_counter", "spi_counter")
+//!                 .source("spi_counter.v")
 //!                 .flag("-Wall"),
 //!         )
 //!         .compile();
@@ -24,7 +24,7 @@
 //!     include!(concat!(env!("OUT_DIR"), "/verilated_models.rs"));
 //! }
 //!
-//! let mut m = bindings::spi_whoami::Model::new();
+//! let mut m = bindings::spi_counter::Model::new();
 //! m.set_cs_n(true); // one setter per input
 //! m.eval();
 //! let driving = m.miso_oe(); // one getter per output

@@ -9,19 +9,19 @@
 //! mod bindings {
 //!     include!(concat!(env!("OUT_DIR"), "/verilated_models.rs"));
 //! }
-//! use bindings::spi_whoami;
+//! use bindings::spi_counter;
 //!
 //! // usually: the typed model
-//! let mut m = spi_whoami::Model::new();
+//! let mut m = spi_counter::Model::new();
 //! m.set_cs_n(true);
 //! m.eval();
 //! let oe = m.miso_oe();
 //!
 //! // or by pin number
-//! let mut raw = virtual_bus::verilated::RawModel::new(&spi_whoami::VTABLE);
-//! raw.set(spi_whoami::CS_N, 1);
+//! let mut raw = virtual_bus::verilated::RawModel::new(&spi_counter::VTABLE);
+//! raw.set(spi_counter::CS_N, 1);
 //! raw.eval();
-//! let oe = raw.get_bit(spi_whoami::MISO_OE);
+//! let oe = raw.get_bit(spi_counter::MISO_OE);
 //! ```
 //!
 //! # Waveforms

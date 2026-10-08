@@ -4,13 +4,13 @@ RTL that `examples/rtl-demo` turns into models with Verilator.
 
 | File | Contents |
 |---|---|
-| `rtl/i2c_whoami.v` | I2C slave. Samples SCL / SDA with a system clock |
-| `rtl/i2c_whoami_scl.v` | The same I2C slave without a system clock, running on SCL / SDA only |
-| `rtl/spi_whoami.v` | SPI slave, clocked by SCK |
+| `rtl/i2c_whoami.v` | I2C slave with two registers. No system clock: runs on SCL / SDA only |
 | `rtl/spi_counter.v` | SPI timer / counter. Runs on a system clock and samples SCK / CS_N / MOSI with it; has an `irq` output |
-| `rtl/*_top.v` | Chip-level tops: power pins, power-on reset, SDA / MISO as `inout` |
-| `rtl/sim/` | Simulation-only wrappers that let Verilator use the `*_top.v` modules |
-| `tb/` | Icarus Verilog unit testbenches |
+| `tb/` | Icarus Verilog unit testbench for `i2c_whoami.v` |
+
+Neither uses `inout`: SDA is split into `sda_i` / `sda_low`, and MISO into `miso` / `miso_oe`.
+virtual-bus-build accepts only inputs and outputs, so if your chip top has `inout` pins, wrap it in a
+simulation-only module that splits them.
 
 ```sh
 make lint   # lint with Verilator

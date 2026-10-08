@@ -6,47 +6,20 @@ module tb_i2c_whoami;
 
   localparam integer QUARTER = 625;  // 400 kHz
 
-  reg clk = 1'b0;
-  reg rst_n = 1'b0;  // the reset pin for the core, vdd (power) for the top
+  reg rst_n = 1'b0;
   reg m_scl_low = 1'b0;
   reg m_sda_low = 1'b0;
   wire scl = ~m_scl_low;
 
-`ifdef USE_TOP
-  // chip top without output enable. SDA is resolved on a line with a pull-up.
-  // No reset pin: reset is released only while vdd is on
-  tri1 sda;
-  assign sda = m_sda_low ? 1'b0 : 1'bz;
-  i2c_whoami_top dut (
-      .vdd(rst_n),
-      .gnd(1'b0),
-      .clk(clk),
-      .scl(scl),
-      .sda(sda)
-  );
-`elsif USE_SCL
-  // the version without a system clock, running on SCL and SDA only (clk is not connected)
-  wire s_sda_low;
-  wire sda = ~(m_sda_low | s_sda_low);
-  i2c_whoami_scl dut (
-      .rst_n(rst_n),
-      .scl(scl),
-      .sda_i(sda),
-      .sda_low(s_sda_low)
-  );
-`else
+  // open drain: SDA is low if the master or the slave pulls it
   wire s_sda_low;
   wire sda = ~(m_sda_low | s_sda_low);
   i2c_whoami dut (
-      .clk(clk),
       .rst_n(rst_n),
       .scl(scl),
       .sda_i(sda),
       .sda_low(s_sda_low)
   );
-`endif
-
-  always #10 clk = ~clk;  // 50 MHz
 
   integer errors = 0;
 
@@ -132,7 +105,7 @@ module tb_i2c_whoami;
 
   initial begin
     // make sure the asynchronous reset gets a falling edge (the initial value at time 0 alone may not count
-    // as an edge, and then the version without a clock is never reset)
+    // as an edge, and then a circuit without a clock is never reset)
     #10 rst_n = 1'b1;
     #10 rst_n = 1'b0;
     #100 rst_n = 1'b1;
@@ -179,18 +152,18 @@ module tb_i2c_whoami;
       errors = errors + 1;
     end
 
-    // no response in reset (power off for the top)
+    // no response in reset
     rst_n = 1'b0;
     #200;
     i2c_start;
     i2c_write_byte({7'h29, 1'b0}, ack);
     i2c_stop;
     if (ack) begin
-      $display("FAIL: ACKed while in reset / unpowered");
+      $display("FAIL: ACKed while in reset");
       errors = errors + 1;
     end
 
-    // after a power cycle (reset release for the core), SCRATCH is back to 0
+    // after reset, SCRATCH is back to 0
     rst_n = 1'b1;
     #1000;
     read_reg(8'h10, d0, ack);
@@ -199,13 +172,7 @@ module tb_i2c_whoami;
       errors = errors + 1;
     end
 
-`ifdef USE_TOP
-    if (errors == 0) $display("PASS tb_i2c_whoami (top without output enable)");
-`elsif USE_SCL
-    if (errors == 0) $display("PASS tb_i2c_whoami (SCL / SDA only)");
-`else
-    if (errors == 0) $display("PASS tb_i2c_whoami (core)");
-`endif
+    if (errors == 0) $display("PASS tb_i2c_whoami");
     $finish;
   end
 

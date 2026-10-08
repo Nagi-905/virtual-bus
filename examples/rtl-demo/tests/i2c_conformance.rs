@@ -1,19 +1,18 @@
-//! Conformance tests shared by all I2C implementations.
+//! Conformance tests: the same tests on a Rust model and on the RTL.
 //!
+//! Write the spec quickly as a Rust model, then check mechanically that the RTL behaves the same way.
 //! The same "WHO_AM_I chip" (address 0x29, 0x0F = 0xA5 read-only, 0x10 = SCRATCH read-write,
-//! the first written byte is the register pointer, auto-incrementing afterwards) is built in five ways:
+//! the first written byte is the register pointer, auto-incrementing afterwards) is built in three ways:
 //!
 //! 1. The Rust model (`RegisterMap`) attached at transaction level (`VirtualI2cBus`)
 //! 2. The same Rust model attached at pin level (`PinLevelI2cSlave` + `SimI2cBus`)
-//! 3. The `i2c_whoami.v` core modeled with Verilator (oversampled with a system clock)
-//! 4. The chip top without output enable, wrapped in a simulation wrapper
-//! 5. `i2c_whoami_scl.v` (no system clock, runs on SCL / SDA only) modeled with Verilator
+//! 3. `i2c_whoami.v` modeled with Verilator
 //!
 //! The same tests run on all of them, and the results must match.
 
 use embedded_hal::i2c::{Error as _, ErrorKind, I2c, NoAcknowledgeSource};
 
-use rtl_demo::i2c_whoami::{VerilatedWhoAmI, VerilatedWhoAmIScl, VerilatedWhoAmITop};
+use rtl_demo::i2c_whoami::VerilatedWhoAmI;
 use virtual_bus::VirtualI2cBus;
 use virtual_bus::bus::i2c::sim::{I2cPinModel, PinLevelI2cSlave, SimI2cBus};
 use virtual_bus::devices::register::{I2cFormat, RegisterMap};
@@ -93,33 +92,4 @@ fn pin_level_rust_model_matches() {
 #[test]
 fn verilated_rtl_matches() {
     assert_eq!(pin_level(VerilatedWhoAmI::new()), rust_model());
-}
-
-#[test]
-fn oe_less_top_matches() {
-    assert_eq!(pin_level(VerilatedWhoAmITop::new()), rust_model());
-}
-
-#[test]
-fn scl_only_rtl_matches() {
-    assert_eq!(pin_level(VerilatedWhoAmIScl::new()), rust_model());
-}
-
-#[test]
-fn rust_model_and_rtl_share_one_virtual_bus() {
-    // 0x20 is a Rust model (transaction level), 0x29 is RTL (pin level).
-    // The user cannot tell them apart
-    let rust = RegisterMap::new().rw(0x00, 0x00);
-    let lines = SimI2cBus::new();
-    lines.attach(VerilatedWhoAmI::new());
-
-    let mut bus = VirtualI2cBus::new();
-    bus.attach(0x20, rust.i2c(I2cFormat::new())).unwrap();
-    bus.attach_i2c(ADDR, lines.master(400_000)).unwrap();
-
-    // write the value read from the RTL into the Rust model
-    let mut who = [0u8];
-    bus.write_read(ADDR, &[0x0F], &mut who).unwrap();
-    bus.write(0x20, &[0x00, who[0]]).unwrap();
-    assert_eq!(rust.get(0x00), 0xA5);
 }

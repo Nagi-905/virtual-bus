@@ -3,7 +3,7 @@
 //! The master gets the pins as [`OutputPin`] / [`InputPin`] and the time as
 //! [`DelayNs`](embedded_hal::delay::DelayNs). Calling `delay_ns` advances the simulated time by that amount.
 //!
-//! - Models driven directly by SCL / SDA (such as `i2c_whoami_scl.v`) are evaluated in
+//! - Models driven directly by SCL / SDA (such as `i2c_whoami.v` in the examples) are evaluated in
 //!   [`I2cPinModel::set_inputs`] whenever a line changes
 //! - Models running on a system clock (such as ICs that oversample SCL / SDA) return
 //!   [`I2cPinModel::period_ps`] and get [`I2cPinModel::tick`] as time advances
@@ -615,6 +615,59 @@ mod tests {
         sda.set_high().unwrap();
         assert!(sda.is_low().unwrap());
         assert!(bus.scl());
+    }
+
+    #[test]
+    fn models_wanting_external_sda_do_not_see_their_own_output() {
+        /// Pulls SDA low while `pull` is set, and records the SDA level it is given
+        struct Probe {
+            external: bool,
+            pull: Rc<RefCell<bool>>,
+            seen: Rc<RefCell<bool>>,
+        }
+        impl I2cPinModel for Probe {
+            fn set_inputs(&mut self, _: bool, sda: bool) {
+                *self.seen.borrow_mut() = sda;
+            }
+            fn sda_low(&self) -> bool {
+                *self.pull.borrow()
+            }
+            fn wants_external_sda(&self) -> bool {
+                self.external
+            }
+        }
+        let probe = |external| {
+            let (pull, seen) = (Rc::new(RefCell::new(false)), Rc::new(RefCell::new(true)));
+            let p = Probe {
+                external,
+                pull: pull.clone(),
+                seen: seen.clone(),
+            };
+            (p, pull, seen)
+        };
+        let bus = SimI2cBus::new();
+        let (ext, ext_pull, ext_seen) = probe(true);
+        let (plain, _, plain_seen) = probe(false);
+        bus.attach(ext);
+        bus.attach(plain);
+        let mut sda = bus.sda_pin();
+
+        // the external model pulls SDA: the line is low, but it is given the level without itself
+        *ext_pull.borrow_mut() = true;
+        sda.set_high().unwrap(); // the master releases SDA; this delivers the inputs again
+        assert!(!bus.sda());
+        assert!(*ext_seen.borrow());
+        assert!(!*plain_seen.borrow());
+
+        // the master pulls SDA too: now someone else drives it low
+        sda.set_low().unwrap();
+        assert!(!*ext_seen.borrow());
+
+        // everybody releases: high for both
+        *ext_pull.borrow_mut() = false;
+        sda.set_high().unwrap();
+        assert!(bus.sda());
+        assert!(*ext_seen.borrow() && *plain_seen.borrow());
     }
 
     #[test]

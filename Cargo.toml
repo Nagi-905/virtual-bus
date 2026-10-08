@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["virtual-bus", "virtual-bus-build", "examples/rtl-demo", "examples/marlin-demo"]
+members = ["virtual-bus", "virtual-bus-build", "examples/rtl-demo"]
 # Only the runtime crate is built by default, so `cargo test` passes without Verilator.
 # Use `cargo test --workspace` to include the RTL demos
 default-members = ["virtual-bus"]
