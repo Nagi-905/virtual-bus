@@ -1,6 +1,6 @@
 [package]
 name = "virtual-bus"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Virtual I2C / SPI buses for running embedded-hal 1.0 drivers against IC models (Rust or Verilator RTL) on your PC"

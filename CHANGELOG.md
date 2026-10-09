@@ -3,19 +3,19 @@
 `virtual-bus` and `virtual-bus-build` share one version: the generated bindings of one must match the
 runtime of the other. Before 1.0, a breaking change raises the minor version.
 
-## Unreleased
+## 0.3.0 (2026-10-10)
 
 ### Breaking changes
 
 - **virtual-bus**: `I2cSlave::start` returns `Result<(), Nack>`, so a model can NACK its own address
   (an EEPROM during its write cycle, a sensor still measuring). Models that override `start` must
-  return `Ok(())`; models that don't are unchanged
+  return `Ok(())`; models that don't are unchanged (5b09025)
 
 ### Added
 
 - Address NACK from a model, on both `VirtualI2cBus` and `PinLevelI2cSlave`. `stop` is called only if
   some `start` in the transaction was ACKed, so a write followed by a NACKed repeated START still gets
-  its `stop`
+  its `stop` (5b09025)
 
 ### Fixed
 

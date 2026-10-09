@@ -24,11 +24,11 @@ Both crates come from this repository. `virtual-bus` is needed too: the generate
 
 ```toml
 [dependencies]
-virtual-bus = { git = "https://github.com/Nagi-905/virtual-bus", tag = "v0.2.0" }
+virtual-bus = { git = "https://github.com/Nagi-905/virtual-bus", tag = "v0.3.0" }
 embedded-hal = "1.0"
 
 [build-dependencies]
-virtual-bus-build = { git = "https://github.com/Nagi-905/virtual-bus", tag = "v0.2.0" }
+virtual-bus-build = { git = "https://github.com/Nagi-905/virtual-bus", tag = "v0.3.0" }
 
 [dev-dependencies]
 embedded-hal-bus = { version = "0.3", features = ["std"] }   # ExclusiveDevice for SPI

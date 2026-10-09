@@ -1,6 +1,6 @@
 [package]
 name = "virtual-bus-build"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 description = "build.rs helper that turns Verilog into a Verilator model usable from virtual-bus"
