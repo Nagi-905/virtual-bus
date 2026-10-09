@@ -1,0 +1,35 @@
+# Checks that need no Verilator: formatting, lints and the tests of virtual-bus and virtual-bus-build.
+# The RTL demo (examples/rtl-demo) needs Verilator 5.x and is checked locally with
+# `cargo test --workspace`.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy -p virtual-bus -p virtual-bus-build --all-targets
+      - run: cargo test -p virtual-bus -p virtual-bus-build
+
+  # rust-version in Cargo.toml says 1.85; make sure it still builds there
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p virtual-bus -p virtual-bus-build
