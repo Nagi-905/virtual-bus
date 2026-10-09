@@ -3,6 +3,14 @@
 `virtual-bus` and `virtual-bus-build` share one version: the generated bindings of one must match the
 runtime of the other. Before 1.0, a breaking change raises the minor version.
 
+## Unreleased
+
+### Fixed
+
+- **virtual-bus-build**: an unpacked array port on the top (`input logic [7:0] a [4]`) was left out of
+  the model without a word, so it stayed at 0. It now stops the build with a message, like `inout` and
+  wider ports (a0d9780)
+
 ## 0.2.0 (2026-10-08)
 
 ### Breaking changes
