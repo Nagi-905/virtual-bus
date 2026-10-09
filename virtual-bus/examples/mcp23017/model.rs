@@ -158,8 +158,9 @@ impl Mcp23017 {
 }
 
 impl I2cSlave for Mcp23017 {
-    fn start(&mut self, dir: Direction) {
+    fn start(&mut self, dir: Direction) -> Result<(), Nack> {
         self.expect_ptr = dir == Direction::Write;
+        Ok(())
     }
 
     fn write(&mut self, data: &[u8]) -> Result<(), Nack> {

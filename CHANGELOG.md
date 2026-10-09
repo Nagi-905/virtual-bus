@@ -5,6 +5,18 @@ runtime of the other. Before 1.0, a breaking change raises the minor version.
 
 ## Unreleased
 
+### Breaking changes
+
+- **virtual-bus**: `I2cSlave::start` returns `Result<(), Nack>`, so a model can NACK its own address
+  (an EEPROM during its write cycle, a sensor still measuring). Models that override `start` must
+  return `Ok(())`; models that don't are unchanged
+
+### Added
+
+- Address NACK from a model, on both `VirtualI2cBus` and `PinLevelI2cSlave`. `stop` is called only if
+  some `start` in the transaction was ACKed, so a write followed by a NACKed repeated START still gets
+  its `stop`
+
 ### Fixed
 
 - **virtual-bus-build**: an unpacked array port on the top (`input logic [7:0] a [4]`) was left out of

@@ -21,7 +21,7 @@ pub enum Direction {
     Read,
 }
 
-/// The slave NACKed a data byte
+/// The slave NACKs its address or a data byte
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Nack;
 
@@ -36,9 +36,16 @@ pub struct Nack;
 /// `start` is called on every START and repeated START. `write` / `read` may be called
 /// several times within one transfer, so remember "the first byte of the transfer"
 /// in `start` (the pin-level path calls them one byte at a time).
+///
+/// When `start` returns `Err(Nack)`, the master sees an address NACK and the transaction ends.
+/// `stop` is called at the end of a transaction only if some `start` in it returned `Ok`: a write
+/// followed by a NACKed repeated START still gets its `stop`.
 pub trait I2cSlave {
-    /// Our address was ACKed after a START / repeated START
-    fn start(&mut self, _dir: Direction) {}
+    /// Our address was received after a START / repeated START. Return `Err(Nack)` to NACK it
+    /// (a chip that is busy, such as an EEPROM during its write cycle)
+    fn start(&mut self, _dir: Direction) -> Result<(), Nack> {
+        Ok(())
+    }
     /// Receives bytes from the master. Return `Err(Nack)` to NACK the last byte
     fn write(&mut self, data: &[u8]) -> Result<(), Nack>;
     /// Fills in the bytes to send to the master
@@ -48,7 +55,7 @@ pub trait I2cSlave {
 }
 
 impl<T: I2cSlave + ?Sized> I2cSlave for Rc<RefCell<T>> {
-    fn start(&mut self, dir: Direction) {
+    fn start(&mut self, dir: Direction) -> Result<(), Nack> {
         self.borrow_mut().start(dir)
     }
     fn write(&mut self, data: &[u8]) -> Result<(), Nack> {
@@ -63,7 +70,7 @@ impl<T: I2cSlave + ?Sized> I2cSlave for Rc<RefCell<T>> {
 }
 
 impl<T: I2cSlave + ?Sized> I2cSlave for Box<T> {
-    fn start(&mut self, dir: Direction) {
+    fn start(&mut self, dir: Direction) -> Result<(), Nack> {
         (**self).start(dir)
     }
     fn write(&mut self, data: &[u8]) -> Result<(), Nack> {
@@ -233,7 +240,13 @@ impl VirtualI2cBus {
             while j < ops.len() && direction(&ops[j]) == dir {
                 j += 1;
             }
-            slave.start(dir);
+            if slave.start(dir).is_err() {
+                // a NACKed repeated START still ends the part that was ACKed
+                if i > 0 {
+                    slave.stop();
+                }
+                return Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Address));
+            }
             match dir {
                 Direction::Write => {
                     let data: Vec<u8> = ops[i..j]
@@ -324,11 +337,20 @@ mod tests {
         next_read: u8,
         nack_after: Option<usize>,
         received: usize,
+        /// NACK the address of these starts (0-based, counted over all transactions)
+        nack_starts: Vec<usize>,
+        starts: usize,
     }
 
     impl I2cSlave for Recorder {
-        fn start(&mut self, dir: Direction) {
+        fn start(&mut self, dir: Direction) -> Result<(), Nack> {
             self.events.push(format!("start {dir:?}"));
+            self.starts += 1;
+            if self.nack_starts.contains(&(self.starts - 1)) {
+                self.events.push("nack".into());
+                return Err(Nack);
+            }
+            Ok(())
         }
         fn write(&mut self, data: &[u8]) -> Result<(), Nack> {
             self.events.push(format!("write {data:02x?}"));
@@ -488,6 +510,47 @@ mod tests {
         assert_eq!(
             inner_model.borrow().events,
             ["start Write", "write [0f]", "start Read", "read 2", "stop"]
+        );
+    }
+
+    #[test]
+    fn model_can_nack_its_address() {
+        let a = shared(Recorder {
+            nack_starts: vec![0],
+            ..Default::default()
+        });
+        let mut bus = VirtualI2cBus::new();
+        bus.attach(0x50, a.clone()).unwrap();
+        assert_eq!(
+            bus.write(0x50, &[1]),
+            Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Address))
+        );
+        // nothing was ACKed, so no write and no stop
+        assert_eq!(a.borrow().events, ["start Write", "nack"]);
+        // the next transaction is ACKed again
+        bus.write(0x50, &[2]).unwrap();
+        assert_eq!(
+            a.borrow().events[2..],
+            ["start Write", "write [02]", "stop"]
+        );
+    }
+
+    #[test]
+    fn nacked_repeated_start_still_stops() {
+        let a = shared(Recorder {
+            nack_starts: vec![1],
+            ..Default::default()
+        });
+        let mut bus = VirtualI2cBus::new();
+        bus.attach(0x50, a.clone()).unwrap();
+        let mut buf = [0u8; 1];
+        assert_eq!(
+            bus.write_read(0x50, &[0x10], &mut buf),
+            Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Address))
+        );
+        assert_eq!(
+            a.borrow().events,
+            ["start Write", "write [10]", "start Read", "nack", "stop"]
         );
     }
 }

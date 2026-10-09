@@ -467,10 +467,15 @@ impl<S: I2cSlave> I2cPinModel for PinLevelI2cSlave<S> {
                         } else {
                             Direction::Write
                         };
-                        self.active = true;
-                        self.slave.start(dir);
-                        self.sda_low = true;
-                        self.state = PinState::AddrAck;
+                        if self.slave.start(dir).is_ok() {
+                            self.active = true;
+                            self.sda_low = true;
+                            self.state = PinState::AddrAck;
+                        } else {
+                            // leave SDA released: the master sees a NACK. `active` keeps
+                            // its value, so a part ACKed before a repeated START still gets `stop`
+                            self.state = PinState::Ignore;
+                        }
                     } else {
                         self.state = PinState::Ignore;
                     }
@@ -540,8 +545,8 @@ impl<S: I2cSlave> I2cPinModel for PinLevelI2cSlave<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::VirtualI2cBus;
     use crate::devices::register::{I2cFormat, I2cRegisterDevice, RegisterMap};
+    use crate::{Nack, VirtualI2cBus};
     use embedded_hal::delay::DelayNs;
     use embedded_hal::i2c::{ErrorKind, I2c, NoAcknowledgeSource};
 
@@ -698,6 +703,75 @@ mod tests {
         // the bus is released after the failure
         assert!(bus.scl() && bus.sda());
         i2c.write(0x20, &[0]).unwrap();
+    }
+
+    /// Records the calls it gets and NACKs the address of the starts listed in `nack`
+    struct Busy {
+        nack: Vec<usize>,
+        starts: usize,
+        events: Vec<String>,
+    }
+    impl I2cSlave for Busy {
+        fn start(&mut self, dir: Direction) -> Result<(), Nack> {
+            self.starts += 1;
+            if self.nack.contains(&(self.starts - 1)) {
+                self.events.push(format!("nack {dir:?}"));
+                return Err(Nack);
+            }
+            self.events.push(format!("start {dir:?}"));
+            Ok(())
+        }
+        fn write(&mut self, data: &[u8]) -> Result<(), Nack> {
+            self.events.push(format!("write {data:02x?}"));
+            Ok(())
+        }
+        fn read(&mut self, buf: &mut [u8]) {
+            buf.fill(0x5A);
+        }
+        fn stop(&mut self) {
+            self.events.push("stop".into());
+        }
+    }
+
+    #[test]
+    fn model_can_nack_its_address_at_pin_level() {
+        use crate::shared;
+        let m = shared(Busy {
+            nack: vec![0, 2],
+            starts: 0,
+            events: vec![],
+        });
+        let bus = SimI2cBus::new();
+        bus.attach(PinLevelI2cSlave::new(0x50, m.clone()));
+        let mut i2c = bus.master(400_000);
+
+        // NACKed address: no write, no stop
+        assert_eq!(
+            i2c.write(0x50, &[1]),
+            Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Address))
+        );
+        assert!(bus.scl() && bus.sda());
+        // write ACKed, repeated START NACKed: the written part still gets its stop
+        let mut b = [0u8];
+        assert_eq!(
+            i2c.write_read(0x50, &[0x10], &mut b),
+            Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Address))
+        );
+        // ACKed again
+        i2c.write(0x50, &[2]).unwrap();
+        assert_eq!(
+            m.borrow().events,
+            [
+                "nack Write",
+                "start Write",
+                "write [10]",
+                "nack Read",
+                "stop",
+                "start Write",
+                "write [02]",
+                "stop"
+            ]
+        );
     }
 
     #[test]
