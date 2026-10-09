@@ -36,8 +36,10 @@ embedded-hal-bus = { version = "0.3", features = ["std"] }   # ExclusiveDevice f
 
 ## 2. Prepare the RTL
 
-- **Top-level ports are inputs and outputs of 1 to 64 bits.** `inout` ports and wider ports stop the
-  build with a message
+- **Top-level ports are inputs and outputs of 1 to 64 bits.** `inout` ports, wider ports and
+  unpacked array ports (`input logic [7:0] a [4]`) stop the build with a message; Verilator itself
+  rejects interface ports on the top. Packed structs and enums are fine: they become plain integers
+- **SystemVerilog works too.** List `.sv` files (packages first) the same way as `.v` files
 - **Split bidirectional pins.** SDA becomes an input and a "pull low" output (`sda_i`, `sda_low`);
   MISO becomes an output and an output enable (`miso`, `miso_oe`). virtual-bus resolves the wires
   (open drain, pull-ups, contention) on the Rust side

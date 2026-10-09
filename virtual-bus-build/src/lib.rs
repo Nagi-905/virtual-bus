@@ -41,8 +41,7 @@
 //! - `VTABLE` and one pin-number constant per port (`CS_N`, `MISO`, ...), for reading and writing
 //!   through `virtual_bus::verilated::RawModel` directly (`Model::raw_mut`)
 //!
-//! Supported top-level ports are inputs and outputs of 1 to 64 bits. `inout` ports and wider ports
-//! stop the build with a message; wrap the top in a module that splits them.
+//! Which top-level ports are supported, and how to split the others, is in `README.md` (section 2).
 //!
 //! Requirements: Verilator 5.x (`verilator` on PATH, or `VERILATOR_ROOT`) and a C++17 compiler.
 //! The using crate must depend on `virtual-bus` (the bindings refer to `virtual_bus::verilated`).
@@ -430,6 +429,14 @@ fn parse_ports(header: &str) -> Result<Vec<Port>, String> {
     let mut ports = Vec::new();
     for line in header.lines() {
         let line = line.trim();
+        // an unpacked array port (`input logic [7:0] a [2]`) is a reference, not a VL_IN / VL_OUT
+        if let Some(decl) = line.strip_prefix("VlUnpacked<") {
+            let name = decl.rsplit('&').next().unwrap_or("").trim_end_matches(';');
+            return Err(format!(
+                "port `{name}` is an unpacked array, which is not supported; wrap the top in a \
+                 module that splits it into separate ports"
+            ));
+        }
         let Some((mac, rest)) = line.split_once('(') else {
             continue;
         };
@@ -1040,6 +1047,13 @@ class alignas(VL_CACHE_LINE_BYTES) Vt VL_NOT_FINAL : public VerilatedModel {
         assert!(e.contains("`sda` is an inout"), "{e}");
         let e = parse_ports("    VL_OUTW(&wide,71,0,3);").unwrap_err();
         assert!(e.contains("`wide` is wider than 64 bits"), "{e}");
+    }
+
+    #[test]
+    fn refuses_unpacked_array_ports() {
+        let header = "    VL_OUT8(&y,7,0);\n    VlUnpacked<CData/*7:0*/, 2> &a;\n";
+        let e = parse_ports(header).unwrap_err();
+        assert!(e.contains("`a` is an unpacked array"), "{e}");
     }
 
     #[test]
