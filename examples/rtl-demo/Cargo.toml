@@ -16,3 +16,5 @@ virtual-bus-build = { path = "../../virtual-bus-build" }
 
 [dev-dependencies]
 embedded-hal-bus = { version = "0.3", features = ["std"] }
+embedded-hal-async = "1.0"
+embassy-futures = "0.1"
