@@ -3,6 +3,15 @@
 `virtual-bus` and `virtual-bus-build` share one version: the generated bindings of one must match the
 runtime of the other. Before 1.0, a breaking change raises the minor version.
 
+## Unreleased
+
+### Breaking changes
+
+- **virtual-bus**: removed `SimSpiBus::set_min_cs_high_ns` and `cs_high_violations`, the only timing check
+  on the buses. Timing margins are checked on real hardware; a model that needs a minimum CS high time
+  can compare the time of `select` with that of the last `deselect` itself. The gap the master leaves
+  between frames (`set_cs_high_ns`) stays
+
 ## 0.4.0 (2026-10-11)
 
 ### Breaking changes

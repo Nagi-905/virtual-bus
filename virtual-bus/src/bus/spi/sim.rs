@@ -77,12 +77,9 @@ struct World {
     devs: Vec<Dev>,
     contentions: usize,
     in_contention: bool,
-    /// t_CSH set by the user (ps). Shorter idle times are violations
-    min_cs_high: u64,
     /// CS high time the bus always keeps between frames (ps), like a real master's gap.
     /// Set by `master` to one SCK period, or by `set_cs_high_ns`
     cs_high: u64,
-    cs_high_violations: usize,
 }
 
 impl World {
@@ -173,9 +170,7 @@ impl SimSpiBus {
                 devs: Vec::new(),
                 contentions: 0,
                 in_contention: false,
-                min_cs_high: 0,
                 cs_high: 0,
-                cs_high_violations: 0,
             })),
         }
     }
@@ -257,7 +252,7 @@ impl SimSpiBus {
     }
 
     /// The time the bus keeps CS deselected between frames, as a real SPI master leaves a gap.
-    /// Selecting a device again sooner advances time by the rest first; this is not a violation.
+    /// Selecting a device again sooner advances time by the rest first.
     ///
     /// Pin writes take no simulated time, so without a gap `ExclusiveDevice` deselects and selects
     /// at the same moment: a slave that synchronizes CS to a system clock never sees the frame end,
@@ -266,45 +261,6 @@ impl SimSpiBus {
     /// a master with a longer gap. The last call wins; it is 0 until then
     pub fn set_cs_high_ns(&self, ns: u64) {
         self.world.borrow_mut().cs_high = ns * 1000;
-    }
-
-    /// Minimum CS deselect time (t_CSH; the high time for active-low CS). Selecting again before
-    /// this time has passed since deselecting is counted as a violation ([`Self::cs_high_violations`]),
-    /// and time is advanced by the missing amount before selecting.
-    ///
-    /// This is the slave's requirement; [`Self::set_cs_high_ns`] is the gap the master leaves
-    /// anyway (one SCK period with [`Self::master`]), and waiting for that is not a violation.
-    ///
-    /// Not needed for frames to work. Use it to check a driver against a datasheet t_CSH longer
-    /// than one SCK period (for example a flash that needs tens of µs between commands): set the
-    /// datasheet value, run the driver, then assert that [`Self::cs_high_violations`] is 0.
-    /// A t_CSH shorter than one SCK period is always met by the bus's own wait
-    ///
-    /// ```
-    /// use embedded_hal::spi::{MODE_0, SpiDevice};
-    /// use embedded_hal_bus::spi::ExclusiveDevice;
-    /// use virtual_bus::bus::spi::sim::{PinLevelSpiSlave, SimSpiBus};
-    /// use virtual_bus::devices::register::{RegisterMap, SpiFormat};
-    ///
-    /// let regs = RegisterMap::new().rw(0x20, 0);
-    /// let bus = SimSpiBus::new();
-    /// bus.set_min_cs_high_ns(50_000); // the datasheet asks for 50 µs between frames
-    /// let cs = bus.add_device(PinLevelSpiSlave::new(regs.spi(SpiFormat::read_bit7_inc_bit6()), MODE_0));
-    /// let spi = bus.master(MODE_0, 1_000_000).unwrap();
-    /// let mut dev = ExclusiveDevice::new(spi, cs, bus.delay()).unwrap();
-    ///
-    /// dev.write(&[0x20, 0x01]).unwrap();
-    /// dev.write(&[0x20, 0x02]).unwrap(); // right away: only 1 µs of CS high
-    /// assert_eq!(bus.cs_high_violations(), 1); // this driver code does not wait long enough
-    /// ```
-    pub fn set_min_cs_high_ns(&self, ns: u64) {
-        self.world.borrow_mut().min_cs_high = ns * 1000;
-    }
-
-    /// Number of times a device was selected again before the time set with
-    /// [`Self::set_min_cs_high_ns`] had passed
-    pub fn cs_high_violations(&self) -> usize {
-        self.world.borrow().cs_high_violations
     }
 
     /// Number of times two or more devices drove MISO at once
@@ -398,13 +354,9 @@ impl SimCsPin {
         if select && d.cs_n {
             // a device that has never been selected has been idle for ever
             if let Some(since) = d.deselected_since {
-                let idle_for = w.now - since;
-                if idle_for < w.min_cs_high {
-                    w.cs_high_violations += 1;
-                }
-                let required = w.min_cs_high.max(w.cs_high);
-                if idle_for < required {
-                    w.advance(required - idle_for);
+                let (idle_for, gap) = (w.now - since, w.cs_high);
+                if idle_for < gap {
+                    w.advance(gap - idle_for);
                 }
             }
             w.devs[self.index].cs_n = false;
@@ -606,21 +558,22 @@ mod tests {
     }
 
     #[test]
-    fn min_cs_high_time_is_checked_and_inserted() {
+    fn selecting_again_too_soon_waits_for_the_gap() {
         let bus = SimSpiBus::new();
-        bus.set_min_cs_high_ns(200);
+        bus.set_cs_high_ns(200);
         let mut cs = bus.add_device(whoami_pin());
         bus.run_ns(1000);
         cs.set_low().unwrap();
         cs.set_high().unwrap();
         let t0 = bus.now_ns();
         cs.set_low().unwrap();
-        assert_eq!(bus.cs_high_violations(), 1);
         assert_eq!(bus.now_ns() - t0, 200);
+        // after a long enough gap, no wait
         cs.set_high().unwrap();
         bus.run_ns(300);
+        let t1 = bus.now_ns();
         cs.set_low().unwrap();
-        assert_eq!(bus.cs_high_violations(), 1);
+        assert_eq!(bus.now_ns(), t1);
     }
 
     #[test]
@@ -675,8 +628,6 @@ mod tests {
         for w in edges.borrow().windows(2).filter(|w| w[0].1) {
             assert!((w[1].0 - w[0].0).abs_diff(1_000_000) <= 20_000, "{w:?}");
         }
-        // the bus's own wait is not a t_CSH violation
-        assert_eq!(bus.cs_high_violations(), 0);
     }
 
     #[test]
@@ -765,16 +716,15 @@ mod tests {
     }
 
     #[test]
-    fn min_cs_idle_time_applies_to_active_high_cs() {
+    fn the_gap_applies_to_active_high_cs() {
         let bus = SimSpiBus::new();
-        bus.set_min_cs_high_ns(200);
+        bus.set_cs_high_ns(200);
         let mut cs = bus.add_device_with(whoami_pin(), CsPolarity::ActiveHigh);
         bus.run_ns(1000);
         cs.set_high().unwrap(); // select
         cs.set_low().unwrap(); // deselect
         let t0 = bus.now_ns();
-        cs.set_high().unwrap(); // select right away → violation, waits 200 ns
-        assert_eq!(bus.cs_high_violations(), 1);
+        cs.set_high().unwrap(); // select right away: waits 200 ns
         assert_eq!(bus.now_ns() - t0, 200);
     }
 }
