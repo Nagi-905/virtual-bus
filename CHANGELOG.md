@@ -3,6 +3,23 @@
 `virtual-bus` and `virtual-bus-build` share one version: the generated bindings of one must match the
 runtime of the other. Before 1.0, a breaking change raises the minor version.
 
+## Unreleased
+
+### Added
+
+- **virtual-bus**: embedded-hal-async. `VirtualI2cBus` and `BitBangI2c` implement the async `I2c`,
+  `VirtualSpiDevice` the async `SpiDevice`, `VirtualSpiBus` and `BitBangSpi` the async `SpiBus`, and
+  `SimDelay` the async `DelayNs`. Each calls its blocking twin, so the log and fault injection are the
+  same and every future finishes on the first poll
+- **virtual-bus**: `block_on`, to call async drivers from a plain `#[test]`
+
+### Note
+
+- Code that has both the blocking and the async trait in scope and calls a method on a bus with dot
+  syntax (`bus.transaction(..)`) no longer compiles (E0034, multiple applicable items). Call it as
+  `embedded_hal::i2c::I2c::transaction(&mut bus, ..)`, or drop a hand-written async adapter: the bus
+  is now async itself
+
 ## 0.3.1 (2026-10-11)
 
 First release on crates.io. No code changes since 0.3.0.

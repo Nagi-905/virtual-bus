@@ -11,9 +11,10 @@ categories = ["embedded", "simulation", "development-tools::testing"]
 
 [dependencies]
 embedded-hal = "1.0"
+embedded-hal-async = "1.0"
 
 [dev-dependencies]
-embedded-hal-bus = { version = "0.3", features = ["std"] }
+embedded-hal-bus = { version = "0.3", features = ["std", "async"] }
 mcp23017-driver = "0.1.2"
 
 [[example]]

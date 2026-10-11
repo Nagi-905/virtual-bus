@@ -10,6 +10,7 @@ A Rust crate for running embedded-hal 1.0 I2C / SPI drivers against IC models on
 
 The only boundary is the embedded-hal traits, so drivers and application code need no changes.
 Drivers from crates.io work as they are. No board required: `cargo test` is enough to run it in CI.
+Async drivers (embedded-hal-async, as used with Embassy) take the same buses.
 
 ### Run your own Verilog together with your firmware
 
@@ -101,6 +102,41 @@ cargo run -p rtl-demo --example spi_counter    # drives the SPI RTL, writes targ
 cargo test --workspace     # also runs the RTL demo
 ```
 
+### Run an async driver
+
+Every bus also implements the embedded-hal-async traits, and `SimDelay` implements the async `DelayNs`.
+Call the async code from a plain `#[test]` with `block_on`.
+
+```rust
+use embedded_hal_async::i2c::I2c;
+use virtual_bus::devices::register::{I2cFormat, RegisterMap};
+use virtual_bus::{VirtualI2cBus, block_on};
+
+// Application code, shared with the firmware: generic over the async trait
+async fn read_whoami<I: I2c>(i2c: &mut I) -> Result<u8, I::Error> {
+    let mut id = [0u8];
+    i2c.write_read(0x29, &[0x0F], &mut id).await?;
+    Ok(id[0])
+}
+
+let regs = RegisterMap::new().ro(0x0F, 0xA5).rw(0x10, 0x00);
+let mut bus = VirtualI2cBus::new();
+bus.attach(0x29, regs.i2c(I2cFormat::new())).unwrap();
+
+assert_eq!(block_on(read_whoami(&mut bus)), Ok(0xA5));
+
+// Several calls: put them in one async block, written as in the firmware
+block_on(async {
+    bus.write(0x29, &[0x10, 0x5A]).await?;
+    read_whoami(&mut bus).await
+})
+.unwrap();
+```
+
+Nothing on the virtual buses really waits, so every future finishes on the first poll.
+Keep the code you want to test in `async fn`s that take the bus and the delay as arguments,
+and leave executor-specific code (spawning tasks, `embassy_time::Timer`) in the firmware's `main`.
+
 ## Crates
 
 | Crate | Role |
@@ -121,6 +157,8 @@ Tested on Linux (including WSL2).
 - I2C: clock stretching, arbitration, multi-master and 10-bit addresses are not supported
 - SPI: only 4-wire SPI with separate MOSI and MISO. 3-wire and Dual / Quad SPI are not supported
 - UART is not supported yet
+- Async: `block_on` only runs futures that finish without waiting for something outside the bus.
+  A driver that awaits a real timer or another task directly cannot be run with it
 
 ## License
 
