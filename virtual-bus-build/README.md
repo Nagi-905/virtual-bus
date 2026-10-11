@@ -28,11 +28,11 @@ since the generated bindings must match the runtime.
 
 ```toml
 [dependencies]
-virtual-bus = "0.4.0"
+virtual-bus = "0.5.0"
 embedded-hal = "1.0"
 
 [build-dependencies]
-virtual-bus-build = "0.4.0"
+virtual-bus-build = "0.5.0"
 
 [dev-dependencies]
 embedded-hal-bus = { version = "0.3", features = ["std"] }   # ExclusiveDevice for SPI
