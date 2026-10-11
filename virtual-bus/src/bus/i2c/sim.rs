@@ -13,13 +13,13 @@
 
 use std::cell::RefCell;
 use std::convert::Infallible;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use embedded_hal::digital::{ErrorType, InputPin, OutputPin};
 
 use super::bitbang::BitBangI2c;
 use super::{Direction, I2cSlave};
-use crate::bus::SimDelay;
+use crate::bus::{Follower, SimClock, SimDelay};
 
 /// Bit-bang I2C master returned by [`SimI2cBus::master`]
 pub type SimI2cMaster = BitBangI2c<SimI2cPin, SimI2cPin, SimDelay>;
@@ -166,8 +166,8 @@ impl World {
         }
     }
 
-    fn advance(&mut self, dt: u64) {
-        let end = self.now + dt;
+    /// Runs the models up to `end`, tick by tick
+    fn run_to(&mut self, end: u64) {
         while let Some(t) = self
             .slots
             .iter()
@@ -190,10 +190,17 @@ impl World {
     }
 }
 
+impl Follower for RefCell<World> {
+    fn run_to(&self, ps: u64) {
+        self.borrow_mut().run_to(ps);
+    }
+}
+
 /// I2C signal lines. Cloning gives another handle to the same lines
 #[derive(Clone)]
 pub struct SimI2cBus {
     world: Rc<RefCell<World>>,
+    clock: SimClock,
 }
 
 impl Default for SimI2cBus {
@@ -203,17 +210,32 @@ impl Default for SimI2cBus {
 }
 
 impl SimI2cBus {
+    /// Lines with a clock of their own
     pub fn new() -> Self {
+        Self::with_clock(&SimClock::new())
+    }
+
+    /// Lines on a shared clock: moving it from anywhere runs the models on these lines
+    pub fn with_clock(clock: &SimClock) -> Self {
+        let world = Rc::new(RefCell::new(World {
+            now: clock.now_ps(),
+            master_scl_low: false,
+            master_sda_low: false,
+            slots: Vec::new(),
+            last: (true, true),
+            trace: None,
+        }));
+        let follower: Weak<RefCell<World>> = Rc::downgrade(&world);
+        clock.follow(follower);
         Self {
-            world: Rc::new(RefCell::new(World {
-                now: 0,
-                master_scl_low: false,
-                master_sda_low: false,
-                slots: Vec::new(),
-                last: (true, true),
-                trace: None,
-            })),
+            world,
+            clock: clock.clone(),
         }
+    }
+
+    /// The clock these lines follow
+    pub fn clock(&self) -> SimClock {
+        self.clock.clone()
     }
 
     /// Attaches a model to the lines. Any number of models can share them
@@ -249,8 +271,7 @@ impl SimI2cBus {
 
     /// A [`DelayNs`](embedded_hal::delay::DelayNs) that advances the time of these lines
     pub fn delay(&self) -> SimDelay {
-        let w = self.world.clone();
-        SimDelay::new(Rc::new(move |ps| w.borrow_mut().advance(ps)))
+        self.clock.delay()
     }
 
     /// A bit-bang I2C master on these lines
@@ -260,11 +281,11 @@ impl SimI2cBus {
 
     /// Just lets time pass
     pub fn run_ns(&self, ns: u64) {
-        self.world.borrow_mut().advance(ns * 1000);
+        self.clock.advance_ns(ns);
     }
 
     pub fn now_ps(&self) -> u64 {
-        self.world.borrow().now
+        self.clock.now_ps()
     }
 
     pub fn now_ns(&self) -> u64 {

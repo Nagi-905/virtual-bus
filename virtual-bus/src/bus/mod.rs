@@ -7,7 +7,7 @@
 //! - [`SimClock`] — simulated time for models on the transaction-level buses
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use embedded_hal::delay::DelayNs;
 
@@ -23,31 +23,29 @@ pub fn shared<T>(value: T) -> Shared<T> {
     Rc::new(RefCell::new(value))
 }
 
-/// A [`DelayNs`] that advances simulated time. The same type for both I2C and SPI signal lines
+/// A [`DelayNs`] that moves a [`SimClock`]. The same type for every bus
 #[derive(Clone)]
 pub struct SimDelay {
-    advance_ps: Rc<dyn Fn(u64)>,
-}
-
-impl SimDelay {
-    pub(crate) fn new(advance_ps: Rc<dyn Fn(u64)>) -> Self {
-        Self { advance_ps }
-    }
+    pub(crate) clock: SimClock,
 }
 
 impl DelayNs for SimDelay {
     fn delay_ns(&mut self, ns: u32) {
-        (self.advance_ps)(u64::from(ns) * 1000);
+        self.clock.advance_ps(u64::from(ns) * 1000);
     }
 }
 
-/// Simulated time for models on [`VirtualI2cBus`](crate::VirtualI2cBus) and the other
-/// transaction-level buses.
+/// Signal lines that follow a clock: they run their models up to the new time when it moves
+pub(crate) trait Follower {
+    fn run_to(&self, ps: u64);
+}
+
+/// Simulated time, one for the whole test.
 ///
 /// - Models read it (`now_ns`) to know if they are still busy
 /// - Drivers move it through [`delay`](Self::delay) (blocking and async `DelayNs`)
-/// - Clones share one time. The bus itself takes no time
-/// - Kept in ps, like the signal lines
+/// - Signal lines built with `with_clock` share it: moving it runs their models and RTL
+/// - Clones share one time. Kept in ps
 ///
 /// ```
 /// use embedded_hal::delay::DelayNs;
@@ -60,7 +58,13 @@ impl DelayNs for SimDelay {
 /// ```
 #[derive(Clone, Default)]
 pub struct SimClock {
-    ps: Rc<Cell<u64>>,
+    inner: Rc<ClockInner>,
+}
+
+#[derive(Default)]
+struct ClockInner {
+    ps: Cell<u64>,
+    followers: RefCell<Vec<Weak<dyn Follower>>>,
 }
 
 impl SimClock {
@@ -69,7 +73,7 @@ impl SimClock {
     }
 
     pub fn now_ps(&self) -> u64 {
-        self.ps.get()
+        self.inner.ps.get()
     }
 
     pub fn now_ns(&self) -> u64 {
@@ -78,12 +82,31 @@ impl SimClock {
 
     /// Moves time forward, e.g. per byte in a model of a chip that is polled without a delay
     pub fn advance_ns(&self, ns: u64) {
-        self.ps.set(self.ps.get() + ns * 1000);
+        self.advance_ps(ns * 1000);
     }
 
     /// A `DelayNs` that moves this clock
     pub fn delay(&self) -> SimDelay {
-        let ps = self.ps.clone();
-        SimDelay::new(Rc::new(move |dt| ps.set(ps.get() + dt)))
+        SimDelay {
+            clock: self.clone(),
+        }
+    }
+
+    /// Moves time and runs every follower up to it. Never call it while holding a follower's lines
+    pub(crate) fn advance_ps(&self, dt: u64) {
+        let t = self.now_ps() + dt;
+        let followers: Vec<_> = {
+            let mut f = self.inner.followers.borrow_mut();
+            f.retain(|w| w.strong_count() > 0);
+            f.iter().filter_map(Weak::upgrade).collect()
+        };
+        for f in followers {
+            f.run_to(t);
+        }
+        self.inner.ps.set(t);
+    }
+
+    pub(crate) fn follow(&self, follower: Weak<dyn Follower>) {
+        self.inner.followers.borrow_mut().push(follower);
     }
 }

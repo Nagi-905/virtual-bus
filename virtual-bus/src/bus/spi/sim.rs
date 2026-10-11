@@ -13,14 +13,14 @@
 
 use std::cell::RefCell;
 use std::convert::Infallible;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use embedded_hal::digital::{ErrorType, InputPin, OutputPin};
 use embedded_hal::spi::{ErrorKind, Mode, Phase, Polarity};
 
 use super::bitbang::BitBangSpi;
 use super::{CsPolarity, SpiSlave};
-use crate::bus::SimDelay;
+use crate::bus::{Follower, SimClock, SimDelay};
 
 /// A model attached to the SPI signal lines
 pub trait SpiPinModel {
@@ -122,8 +122,8 @@ impl World {
         }
     }
 
-    fn advance(&mut self, dt: u64) {
-        let end = self.now + dt;
+    /// Runs the models up to `end`, tick by tick
+    fn run_to(&mut self, end: u64) {
         while let Some(t) = self
             .devs
             .iter()
@@ -148,10 +148,17 @@ impl World {
 /// Bit-bang SPI master returned by [`SimSpiBus::master`]
 pub type SimSpiMaster = BitBangSpi<SimSpiPin, SimSpiPin, SimMisoPin, SimDelay>;
 
+impl Follower for RefCell<World> {
+    fn run_to(&self, ps: u64) {
+        self.borrow_mut().run_to(ps);
+    }
+}
+
 /// SPI signal lines. Cloning gives another handle to the same lines
 #[derive(Clone)]
 pub struct SimSpiBus {
     world: Rc<RefCell<World>>,
+    clock: SimClock,
 }
 
 impl Default for SimSpiBus {
@@ -161,18 +168,33 @@ impl Default for SimSpiBus {
 }
 
 impl SimSpiBus {
+    /// Lines with a clock of their own
     pub fn new() -> Self {
+        Self::with_clock(&SimClock::new())
+    }
+
+    /// Lines on a shared clock: moving it from anywhere runs the models on these lines
+    pub fn with_clock(clock: &SimClock) -> Self {
+        let world = Rc::new(RefCell::new(World {
+            now: clock.now_ps(),
+            sck: false,
+            mosi: false,
+            devs: Vec::new(),
+            contentions: 0,
+            in_contention: false,
+            cs_high: 0,
+        }));
+        let follower: Weak<RefCell<World>> = Rc::downgrade(&world);
+        clock.follow(follower);
         Self {
-            world: Rc::new(RefCell::new(World {
-                now: 0,
-                sck: false,
-                mosi: false,
-                devs: Vec::new(),
-                contentions: 0,
-                in_contention: false,
-                cs_high: 0,
-            })),
+            world,
+            clock: clock.clone(),
         }
+    }
+
+    /// The clock these lines follow
+    pub fn clock(&self) -> SimClock {
+        self.clock.clone()
     }
 
     /// Attaches a model and returns its CS pin (selected when low)
@@ -203,6 +225,7 @@ impl SimSpiBus {
         });
         SimCsPin {
             world: self.world.clone(),
+            clock: self.clock.clone(),
             index: w.devs.len() - 1,
         }
     }
@@ -228,8 +251,7 @@ impl SimSpiBus {
     }
 
     pub fn delay(&self) -> SimDelay {
-        let w = self.world.clone();
-        SimDelay::new(Rc::new(move |ps| w.borrow_mut().advance(ps)))
+        self.clock.delay()
     }
 
     /// A bit-bang SPI master on these lines.
@@ -273,11 +295,11 @@ impl SimSpiBus {
     }
 
     pub fn run_ns(&self, ns: u64) {
-        self.world.borrow_mut().advance(ns * 1000);
+        self.clock.advance_ns(ns);
     }
 
     pub fn now_ps(&self) -> u64 {
-        self.world.borrow().now
+        self.clock.now_ps()
     }
 
     pub fn now_ns(&self) -> u64 {
@@ -339,6 +361,7 @@ impl InputPin for SimMisoPin {
 /// The CS of one device. Which level selects it depends on the [`CsPolarity`] given when attaching
 pub struct SimCsPin {
     world: Rc<RefCell<World>>,
+    clock: SimClock,
     index: usize,
 }
 
@@ -348,17 +371,25 @@ impl ErrorType for SimCsPin {
 
 impl SimCsPin {
     fn drive(&mut self, level: bool) {
+        // wait out the CS gap first, without holding the lines: moving time runs the models
+        let wait = {
+            let w = self.world.borrow();
+            let d = &w.devs[self.index];
+            match d.deselected_since {
+                // a device that has never been selected has been idle for ever
+                Some(since) if d.polarity.is_selected(level) && d.cs_n => {
+                    w.cs_high.saturating_sub(w.now - since)
+                }
+                _ => 0,
+            }
+        };
+        if wait > 0 {
+            self.clock.advance_ps(wait);
+        }
         let mut w = self.world.borrow_mut();
         let d = &w.devs[self.index];
         let select = d.polarity.is_selected(level);
         if select && d.cs_n {
-            // a device that has never been selected has been idle for ever
-            if let Some(since) = d.deselected_since {
-                let (idle_for, gap) = (w.now - since, w.cs_high);
-                if idle_for < gap {
-                    w.advance(gap - idle_for);
-                }
-            }
             w.devs[self.index].cs_n = false;
         } else if !select && !d.cs_n {
             let now = w.now;

@@ -12,6 +12,12 @@ runtime of the other. Before 1.0, a breaking change raises the minor version.
   can compare the time of `select` with that of the last `deselect` itself. The gap the master leaves
   between frames (`set_cs_high_ns`) stays
 
+### Added
+
+- **virtual-bus**: `SimI2cBus::with_clock` / `SimSpiBus::with_clock` and `clock()`. Signal lines can share
+  one `SimClock` with transaction-level models: moving it from anywhere (a delay, a model's `advance_ns`,
+  another bus) runs the system clocks of the models on every line that follows it
+
 ## 0.4.0 (2026-10-11)
 
 ### Breaking changes
