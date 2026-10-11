@@ -3,6 +3,16 @@
 `virtual-bus` and `virtual-bus-build` share one version: the generated bindings of one must match the
 runtime of the other. Before 1.0, a breaking change raises the minor version.
 
+## Unreleased
+
+### Repository
+
+- README lists the crates.io drivers tested with virtual-bus 0.5.0
+- The MCP23017 example's tests are split into the model on its own (`mcp23017_model.rs`) and the
+  crates.io driver on both paths (`mcp23017_driver.rs`)
+- More tests: I2C data NACK on the signal lines, faults through a crates.io driver and recovery, one
+  driver on both SPI paths, `SimPin` edges, and the whole interrupt flow of the `spi_counter` RTL
+
 ## 0.5.0 (2026-10-11)
 
 ### Breaking changes

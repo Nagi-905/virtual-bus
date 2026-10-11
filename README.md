@@ -158,6 +158,26 @@ pins and the delay as arguments, and leave executor-specific code (spawning task
 in the firmware's `main`. `virtual-bus/tests/lis3dh_async.rs` runs `lis3dh-async` from crates.io this way,
 and `virtual-bus/tests/scheduler.rs` shows the scheduling.
 
+## Tested drivers
+
+crates.io drivers that ran unchanged on virtual-bus 0.5.0, against models written from datasheets.
+This is not a guarantee that the drivers are free of bugs.
+
+| Driver | Version | Bus |
+|---|---|---|
+| `mcp23017-driver` | 0.1.2 | I2C |
+| `lis3dh-async` | 0.9.3 | I2C, SPI |
+| `eeprom24x` | 0.7.2 | I2C |
+| `sht4x` | 0.2.0 | I2C |
+| `lm75` | 1.0.0 | I2C |
+| `pcf857x` | 0.5.0 | I2C |
+| `ssd1306` | 0.10.0 | I2C |
+| `lis3dh` | 0.5.0 | SPI |
+| `eeprom25aa02e48` | 1.0.1 | SPI |
+| `w25q32jv` | 0.5.1 | SPI |
+| `mcp23s17` | 0.2.0 | SPI |
+| `ds323x` | 0.7.0 | SPI |
+
 ## Crates
 
 | Crate | Role |
