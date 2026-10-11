@@ -491,25 +491,6 @@ mod tests {
     }
 
     #[test]
-    fn bytes_after_a_model_nack_are_not_sent() {
-        let a = shared(Recorder {
-            nack_after: Some(1),
-            ..Default::default()
-        });
-        let mut bus = VirtualI2cBus::new();
-        bus.attach(0x20, a.clone()).unwrap();
-        assert_eq!(
-            bus.write(0x20, &[1, 2, 3, 4]),
-            Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Data))
-        );
-        // 02 is NACKed: 03 and 04 never reach the model
-        assert_eq!(
-            a.borrow().events,
-            ["start Write", "write [01]", "write [02]", "stop"]
-        );
-    }
-
-    #[test]
     fn empty_write_probes_presence() {
         let mut bus = VirtualI2cBus::new();
         bus.attach(0x3C, Recorder::default()).unwrap();

@@ -95,28 +95,6 @@ fn several_calls_in_one_block() {
     assert_eq!((id, g.z), (0x33, 1.0));
 }
 
-#[test]
-fn bus_errors_reach_the_async_driver() {
-    // nobody at 0x19
-    let mut bus = VirtualI2cBus::new();
-    bus.attach(0x18, lis3dh().i2c(I2cFormat::inc_bit7()))
-        .unwrap();
-    assert!(matches!(
-        block_on(Lis3dh::new_i2c(&mut bus, SlaveAddr::Alternate)),
-        Err(Error::Bus(ErrorKind::NoAcknowledge(
-            NoAcknowledgeSource::Address
-        )))
-    ));
-
-    // NACK the next transaction (the axis read)
-    bus.inject_fault(Fault::AddressNack);
-    let mut accel = block_on(Lis3dh::new_i2c_without_config(&mut bus, SlaveAddr::Default));
-    assert!(matches!(
-        block_on(accel.accel_raw()),
-        Err(Error::Bus(ErrorKind::NoAcknowledge(_)))
-    ));
-}
-
 // --- faults reach the driver, and it works again afterwards -------------------
 
 #[test]
@@ -124,7 +102,17 @@ fn i2c_faults_reach_the_driver_and_it_recovers() {
     let m = lis3dh();
     let mut bus = VirtualI2cBus::new();
     bus.attach(0x18, m.i2c(I2cFormat::inc_bit7())).unwrap();
+
+    // nobody at 0x19
+    assert!(matches!(
+        block_on(Lis3dh::new_i2c(&mut bus, SlaveAddr::Alternate)),
+        Err(Error::Bus(ErrorKind::NoAcknowledge(
+            NoAcknowledgeSource::Address
+        )))
+    ));
+
     for fault in [
+        Fault::AddressNack,
         Fault::BusError,
         Fault::ArbitrationLoss,
         Fault::DataNack { index: 0 },

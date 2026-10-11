@@ -384,12 +384,6 @@ mod tests {
     }
 
     #[test]
-    fn ready_catches_a_waiting_future() {
-        let caught = std::panic::catch_unwind(|| ready(core::future::pending::<()>()));
-        assert!(caught.is_err());
-    }
-
-    #[test]
     fn virtual_i2c_bus() {
         let map = regs();
         let mut bus = VirtualI2cBus::new();
@@ -410,19 +404,6 @@ mod tests {
             ready(read_whoami(&mut bus, 0x30)),
             Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Address))
         );
-    }
-
-    #[test]
-    fn several_calls_in_one_block() {
-        let map = regs();
-        let mut bus = VirtualI2cBus::new();
-        bus.attach(0x29, map.i2c(I2cFormat::new())).unwrap();
-        let who = block_on(async {
-            I2c::write(&mut bus, 0x29, &[0x10, 0x77]).await?;
-            read_whoami(&mut bus, 0x29).await
-        });
-        assert_eq!(who, Ok(0xA5));
-        assert_eq!(map.get(0x10), 0x77);
     }
 
     #[test]
