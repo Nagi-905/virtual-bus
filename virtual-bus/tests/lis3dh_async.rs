@@ -116,3 +116,106 @@ fn bus_errors_reach_the_async_driver() {
         Err(Error::Bus(ErrorKind::NoAcknowledge(_)))
     ));
 }
+
+// --- faults reach the driver, and it works again afterwards -------------------
+
+#[test]
+fn i2c_faults_reach_the_driver_and_it_recovers() {
+    let m = lis3dh();
+    let mut bus = VirtualI2cBus::new();
+    bus.attach(0x18, m.i2c(I2cFormat::inc_bit7())).unwrap();
+    for fault in [
+        Fault::BusError,
+        Fault::ArbitrationLoss,
+        Fault::DataNack { index: 0 },
+    ] {
+        bus.inject_fault(fault);
+        let mut accel = block_on(Lis3dh::new_i2c_without_config(&mut bus, SlaveAddr::Default));
+        assert!(
+            matches!(block_on(accel.get_device_id()), Err(Error::Bus(_))),
+            "{fault:?}"
+        );
+        // the next transaction is clean
+        assert_eq!(block_on(accel.get_device_id()).unwrap(), 0x33);
+    }
+}
+
+#[test]
+fn spi_faults_reach_the_driver_and_it_recovers() {
+    use embedded_hal::spi::ErrorKind as SpiErrorKind;
+    use virtual_bus::bus::spi::{SpiError, SpiFault};
+
+    let m = lis3dh();
+    let mut dev = VirtualSpiDevice::new(m.spi(SpiFormat::read_bit7_inc_bit6()), MODE_3);
+
+    // an error from the bus
+    dev.inject_fault(SpiFault::Error(SpiErrorKind::Other));
+    assert!(matches!(
+        block_on(Lis3dh::new_spi(&mut dev)),
+        Err(Error::Bus(SpiError::Injected(SpiErrorKind::Other)))
+    ));
+
+    // MISO stuck high: WHO_AM_I reads FFh and the driver refuses the chip
+    dev.inject_fault(SpiFault::MisoStuck(0xFF));
+    assert!(matches!(
+        block_on(Lis3dh::new_spi(&mut dev)),
+        Err(Error::WrongAddress)
+    ));
+
+    // clean again: the driver configures the chip
+    block_on(Lis3dh::new_spi(&mut dev)).unwrap();
+    assert_eq!(m.get(CTRL_REG1), 0x77);
+
+    // a flipped bit in OUT_X_L (byte 1 after the command): no error, a wrong value
+    expose(&m, [0, 0, 1000]);
+    dev.inject_fault(SpiFault::FlipBits {
+        index: 1,
+        mask: 0x10,
+    });
+    let mut accel = block_on(Lis3dh::new_spi_without_config(&mut dev));
+    let raw = block_on(accel.accel_raw()).unwrap();
+    assert_eq!(raw.x >> 4, 1, "1 mg off, and the driver cannot tell");
+    let raw = block_on(accel.accel_raw()).unwrap();
+    assert_eq!((raw.x >> 4, raw.z >> 4), (0, 1000));
+}
+
+// --- the same driver gives the same results on both SPI paths -----------------
+
+async fn read_all<S>(spi: S) -> (u8, [i16; 3])
+where
+    S: embedded_hal_async::spi::SpiDevice,
+    S::Error: core::fmt::Debug,
+{
+    let mut accel = Lis3dh::new_spi(spi).await.unwrap();
+    let id = accel.get_device_id().await.unwrap();
+    let raw = accel.accel_raw().await.unwrap();
+    (id, [raw.x, raw.y, raw.z])
+}
+
+#[test]
+fn the_same_driver_reads_the_same_on_both_spi_paths() {
+    use embedded_hal_bus::spi::ExclusiveDevice;
+    use virtual_bus::bus::spi::sim::{PinLevelSpiSlave, SimSpiBus};
+
+    let format = SpiFormat::read_bit7_inc_bit6;
+
+    // transaction level
+    let a = lis3dh();
+    expose(&a, [-500, 250, 1000]);
+    let txn = block_on(read_all(VirtualSpiDevice::new(a.spi(format()), MODE_3)));
+
+    // signal level: the same register map behind a pin-level adapter and a 1 MHz bit-bang master
+    let b = lis3dh();
+    expose(&b, [-500, 250, 1000]);
+    let lines = SimSpiBus::new();
+    let cs = lines.add_device(PinLevelSpiSlave::new(b.spi(format()), MODE_3));
+    let master = lines.master(MODE_3, 1_000_000).unwrap();
+    let dev = ExclusiveDevice::new(master, cs, lines.delay()).unwrap();
+    let pin = block_on(read_all(dev));
+
+    assert_eq!(txn, pin);
+    assert_eq!(txn.0, 0x33);
+    for r in [TEMP_CFG_REG, CTRL_REG1, CTRL_REG4] {
+        assert_eq!(a.get(r), b.get(r), "register {r:#04x}");
+    }
+}

@@ -152,3 +152,39 @@ fn firmware_waits_for_the_rtl_interrupt() {
     // then COUNT moves on during the address byte of the read (about 9 µs)
     assert!((101..=104).contains(&count), "COUNT {count}");
 }
+
+/// The whole interrupt flow: wait, read STATUS, clear MATCH, and irq goes low
+#[test]
+fn firmware_handles_the_rtl_interrupt_to_the_end() {
+    let clock = SimClock::new();
+    let (mut spi, rtl) = counter_on(&clock);
+    let irq = SimPin::new(false);
+    let mut irq_pin = irq.clone();
+    let mut sample = clock.delay();
+
+    let ((status, cleared), ()) = block_on(join(
+        // the firmware's interrupt handling
+        async {
+            start(&mut spi, 100, true);
+            irq_pin.wait_for_high().await.unwrap();
+            let status = read(&mut spi, SpiCounter::REG_STATUS);
+            spi.write(&[SpiCounter::REG_STATUS, 0x01]).unwrap(); // write 1 to clear MATCH
+            let cleared = read(&mut spi, SpiCounter::REG_STATUS);
+            (status, cleared)
+        },
+        // the board: irq wired to the MCU pin, sampled every 10 µs
+        async {
+            while !rtl.borrow().irq() {
+                embedded_hal_async::delay::DelayNs::delay_us(&mut sample, 10).await;
+            }
+            irq.set(true);
+        },
+    ));
+
+    assert_eq!(status & 0x01, 0x01, "MATCH was set");
+    assert_eq!(cleared & 0x01, 0x00, "MATCH is cleared");
+    assert!(!rtl.borrow().irq(), "irq follows MATCH");
+    // and stays low: COUNT is past COMPARE until it wraps (256 × 5.12 µs)
+    embedded_hal::delay::DelayNs::delay_us(&mut clock.delay(), 100);
+    assert!(!rtl.borrow().irq());
+}

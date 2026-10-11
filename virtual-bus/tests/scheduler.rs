@@ -142,6 +142,60 @@ fn edges_after_the_wait_are_seen() {
     assert_eq!(clock.now_ns(), 3_000);
 }
 
+#[test]
+fn a_rising_edge_after_the_wait_is_seen() {
+    let clock = SimClock::new();
+    let irq = SimPin::new(false);
+    let mut pin = irq.clone();
+    let mut d = clock.delay();
+    block_on(join(pin.wait_for_rising_edge(), async {
+        d.delay_us(2).await;
+        irq.set(true);
+    }))
+    .0
+    .unwrap();
+    assert_eq!(clock.now_ns(), 2_000);
+}
+
+#[test]
+fn any_edge_wakes_on_either_direction() {
+    let clock = SimClock::new();
+    let line = SimPin::new(true);
+    let mut pin = line.clone();
+    let mut d = clock.delay();
+    let woke = RefCell::new(Vec::new());
+    block_on(join(
+        async {
+            pin.wait_for_any_edge().await.unwrap();
+            woke.borrow_mut().push(clock.now_ns());
+            pin.wait_for_any_edge().await.unwrap();
+            woke.borrow_mut().push(clock.now_ns());
+        },
+        async {
+            d.delay_us(1).await;
+            line.set(false);
+            d.delay_us(1).await;
+            line.set(true);
+        },
+    ));
+    assert_eq!(*woke.borrow(), [1_000, 2_000]);
+}
+
+/// The wrong direction, or driving the level it already has, is not an edge
+#[test]
+#[should_panic(expected = "nothing here will wake it")]
+fn a_falling_edge_does_not_end_a_rising_wait() {
+    let clock = SimClock::new();
+    let line = SimPin::new(true);
+    let mut pin = line.clone();
+    let mut d = clock.delay();
+    let _ = block_on(join(pin.wait_for_rising_edge(), async {
+        d.delay_us(1).await;
+        line.set(true); // no change
+        line.set(false); // falling
+    }));
+}
+
 // --- a timeout that loses leaves nothing behind ---------------------------------
 
 #[test]

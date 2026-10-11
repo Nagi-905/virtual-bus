@@ -754,6 +754,58 @@ mod tests {
         }
     }
 
+    /// Data NACK: the master stops after the NACKed byte, on the signal lines as on VirtualI2cBus
+    #[test]
+    fn data_nack_stops_the_write_on_both_paths() {
+        use crate::bus::i2c::VirtualI2cBus;
+        use crate::shared;
+
+        /// NACKs the second byte of a write
+        struct NackSecond {
+            got: usize,
+            events: Vec<String>,
+        }
+        impl I2cSlave for NackSecond {
+            fn start(&mut self, dir: Direction) -> Result<(), Nack> {
+                self.got = 0;
+                self.events.push(format!("start {dir:?}"));
+                Ok(())
+            }
+            fn write(&mut self, data: &[u8]) -> Result<(), Nack> {
+                self.events.push(format!("write {data:02x?}"));
+                self.got += data.len();
+                if self.got >= 2 { Err(Nack) } else { Ok(()) }
+            }
+            fn read(&mut self, _: &mut [u8]) {}
+            fn stop(&mut self) {
+                self.events.push("stop".into());
+            }
+        }
+        let new = || {
+            shared(NackSecond {
+                got: 0,
+                events: vec![],
+            })
+        };
+        let data_nack = Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Data));
+
+        let pin = new();
+        let lines = SimI2cBus::new();
+        lines.attach(PinLevelI2cSlave::new(0x50, pin.clone()));
+        assert_eq!(lines.master(400_000).write(0x50, &[1, 2, 3, 4]), data_nack);
+        assert!(lines.scl() && lines.sda(), "the bus is released");
+
+        let txn = new();
+        let mut bus = VirtualI2cBus::new();
+        bus.attach(0x50, txn.clone()).unwrap();
+        assert_eq!(bus.write(0x50, &[1, 2, 3, 4]), data_nack);
+
+        // 03 and 04 never reach the model, on either path
+        let expected = ["start Write", "write [01]", "write [02]", "stop"];
+        assert_eq!(pin.borrow().events, expected);
+        assert_eq!(txn.borrow().events, expected);
+    }
+
     #[test]
     fn model_can_nack_its_address_at_pin_level() {
         use crate::shared;

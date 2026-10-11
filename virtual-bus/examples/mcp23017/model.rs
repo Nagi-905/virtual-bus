@@ -1,7 +1,7 @@
 //! Transaction-level model of the MCP23017 (16-bit I/O expander).
 //!
 //! An example of writing an IC model with virtual-bus's building blocks ([`I2cSlave`]).
-//! Included with `mod` from both the example (`main.rs`) and the test (`tests/mcp23017.rs`).
+//! Included with `mod` from both the example (`main.rs`) and the tests (`tests/mcp23017_model.rs`, `tests/mcp23017_driver.rs`).
 //!
 //! Register layout for IOCON.BANK = 0. The first written byte is the register pointer;
 //! after that it auto-increments through 0x00..=0x15 byte by byte (SEQOP = 0).
