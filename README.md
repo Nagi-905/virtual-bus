@@ -30,7 +30,8 @@ When a test fails, look inside the RTL: add `.trace()` to the model in `build.rs
 ### Reproduce situations that are hard to create on real hardware
 
 - Inject NACKs, bus errors, a stuck MISO or flipped bits to exercise your driver's error handling
-- Let a model NACK its own address while it is busy, as an EEPROM does during its write cycle
+- Let a model NACK its own address while it is busy, as an EEPROM does during its write cycle.
+  `SimClock` gives the model the time the driver waited
 - Catch SPI mode mismatches, a too-short CS idle time (t_CSH) and MISO contention
 - With a power-on reset in your RTL, check that a power cycle brings registers back to their reset values
 

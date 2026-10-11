@@ -26,6 +26,7 @@
 //! | Simulate signal lines and timing | [`bus::i2c::sim::SimI2cBus`], [`bus::spi::sim::SimSpiBus`] |
 //! | Put a Rust model on the signal lines | [`bus::i2c::sim::PinLevelI2cSlave`], [`bus::spi::sim::PinLevelSpiSlave`] |
 //! | Attach Verilog RTL | See "Attaching Verilog" below |
+//! | Give models time (busy, measuring) on the fast buses | [`SimClock`] |
 //! | Inject faults such as NACKs | [`VirtualI2cBus::inject_fault`], [`bus::spi::VirtualSpiDevice::inject_fault`] |
 //! | Run async drivers (embedded-hal-async, Embassy) | The same buses, and [`block_on`] (see [`asynch`]) |
 //!
@@ -51,4 +52,4 @@ pub mod verilated;
 
 pub use asynch::block_on;
 pub use bus::i2c::{AttachError, Direction, Fault, I2cSlave, LogEntry, LogOp, Nack, VirtualI2cBus};
-pub use bus::{Shared, SimDelay, shared};
+pub use bus::{Shared, SimClock, SimDelay, shared};

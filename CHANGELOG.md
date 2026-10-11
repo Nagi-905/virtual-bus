@@ -14,6 +14,8 @@ runtime of the other. Before 1.0, a breaking change raises the minor version.
 - **virtual-bus**: `block_on`, to call async drivers from a plain `#[test]`. A future that wakes itself
   (`yield_now`) is polled again; one that returns `Pending` with nothing to wake it panics instead of
   hanging the test
+- **virtual-bus**: `SimClock`, simulated time for models on the transaction-level buses. Models read
+  `now_ns`; drivers move it with `delay()` (a `SimDelay`, blocking and async). The bus itself takes no time
 - **virtual-bus**: a test running `lis3dh-async` from crates.io on a LIS3DH register map, over I2C and SPI
 
 ### Note
