@@ -54,6 +54,26 @@ fn tasks_resume_in_time_order() {
     assert_eq!(*log.borrow(), [("B", 1_000_000), ("A", 2_000_000)]);
 }
 
+/// Two timers due at the same time: the clock moves once, and the tasks run in the order they waited
+#[test]
+fn timers_due_at_the_same_time() {
+    let clock = SimClock::new();
+    let log = RefCell::new(Vec::new());
+    let (mut da, mut db) = (clock.delay(), clock.delay());
+    block_on(join(
+        async {
+            da.delay_ms(1).await;
+            log.borrow_mut().push(("A", clock.now_ns()));
+        },
+        async {
+            db.delay_ms(1).await;
+            log.borrow_mut().push(("B", clock.now_ns()));
+        },
+    ));
+    assert_eq!(*log.borrow(), [("A", 1_000_000), ("B", 1_000_000)]);
+    assert_eq!(clock.now_ns(), 1_000_000);
+}
+
 /// A blocking delay inside a task holds up the others, as on a real executor
 #[test]
 fn a_blocking_delay_holds_up_the_other_tasks() {
@@ -179,6 +199,33 @@ fn any_edge_wakes_on_either_direction() {
         },
     ));
     assert_eq!(*woke.borrow(), [1_000, 2_000]);
+}
+
+/// Several tasks waiting on one wire: one change wakes them all
+#[test]
+fn one_change_wakes_every_waiter() {
+    let clock = SimClock::new();
+    let irq = SimPin::new(false);
+    let (mut level, mut edge) = (irq.clone(), irq.clone());
+    let mut d = clock.delay();
+    let woke = RefCell::new(Vec::new());
+    block_on(join(
+        join(
+            async {
+                level.wait_for_high().await.unwrap();
+                woke.borrow_mut().push(("level", clock.now_ns()));
+            },
+            async {
+                edge.wait_for_rising_edge().await.unwrap();
+                woke.borrow_mut().push(("edge", clock.now_ns()));
+            },
+        ),
+        async {
+            d.delay_us(3).await;
+            irq.set(true);
+        },
+    ));
+    assert_eq!(*woke.borrow(), [("level", 3_000), ("edge", 3_000)]);
 }
 
 /// The wrong direction, or driving the level it already has, is not an edge
