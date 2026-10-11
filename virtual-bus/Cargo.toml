@@ -1,11 +1,13 @@
 [package]
 name = "virtual-bus"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Virtual I2C / SPI buses for running embedded-hal 1.0 drivers against IC models (Rust or Verilator RTL) on your PC"
 license = "MIT"
-publish = false
+repository = "https://github.com/Nagi-905/virtual-bus"
+keywords = ["embedded-hal", "i2c", "spi", "simulation", "verilator"]
+categories = ["embedded", "simulation", "development-tools::testing"]
 
 [dependencies]
 embedded-hal = "1.0"

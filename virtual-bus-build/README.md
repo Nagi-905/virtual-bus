@@ -1,11 +1,14 @@
 # virtual-bus-build
 
-Attach your own Verilog to [virtual-bus](../README.md): this crate runs Verilator from `build.rs` and
-generates a Rust `Model` per RTL, with a method per port. You then write a small adapter that drives the
-model's ports from the simulated signal lines, and test the RTL with ordinary embedded-hal drivers.
+Attach your own Verilog to [virtual-bus](https://github.com/Nagi-905/virtual-bus): this crate runs
+Verilator from `build.rs` and generates a Rust `Model` per RTL, with a method per port. You then write a
+small adapter that drives the model's ports from the simulated signal lines, and test the RTL with
+ordinary embedded-hal drivers.
 
-This page walks through the whole flow. The working sample is `examples/rtl-demo`
-(`examples/verilog/rtl/` for the RTL); try it with `cargo run -p rtl-demo --example spi_counter`.
+This page walks through the whole flow. File paths below are relative to the
+[repository](https://github.com/Nagi-905/virtual-bus). The working sample is `examples/rtl-demo`
+(`examples/verilog/rtl/` for the RTL); clone the repository and try it with
+`cargo run -p rtl-demo --example spi_counter`.
 
 ```text
 your RTL ──build.rs──▶ Model (set_<input>, <output>(), eval) ──adapter──▶ I2cPinModel / SpiPinModel
@@ -20,15 +23,16 @@ your RTL ──build.rs──▶ Model (set_<input>, <output>(), eval) ──ada
 
 ## 1. Add the dependencies
 
-Both crates come from this repository. `virtual-bus` is needed too: the generated code refers to it.
+`virtual-bus` is needed too: the generated code refers to it. Use the same version of both crates,
+since the generated bindings must match the runtime.
 
 ```toml
 [dependencies]
-virtual-bus = { git = "https://github.com/Nagi-905/virtual-bus", tag = "v0.3.0" }
+virtual-bus = "0.3.1"
 embedded-hal = "1.0"
 
 [build-dependencies]
-virtual-bus-build = { git = "https://github.com/Nagi-905/virtual-bus", tag = "v0.3.0" }
+virtual-bus-build = "0.3.1"
 
 [dev-dependencies]
 embedded-hal-bus = { version = "0.3", features = ["std"] }   # ExclusiveDevice for SPI

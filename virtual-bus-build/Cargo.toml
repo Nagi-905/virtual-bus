@@ -1,12 +1,14 @@
 [package]
 name = "virtual-bus-build"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.85"
 description = "build.rs helper that turns Verilog into a Verilator model usable from virtual-bus"
 license = "MIT"
 readme = "README.md"
-publish = false
+repository = "https://github.com/Nagi-905/virtual-bus"
+keywords = ["verilator", "verilog", "build-script", "simulation", "embedded-hal"]
+categories = ["development-tools::build-utils", "simulation", "embedded"]
 
 [dependencies]
 # parallel: compile the Verilator runtime and the generated C++ on all cores (about 34 s → 15 s for rtl-demo)

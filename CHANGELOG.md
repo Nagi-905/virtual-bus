@@ -3,6 +3,16 @@
 `virtual-bus` and `virtual-bus-build` share one version: the generated bindings of one must match the
 runtime of the other. Before 1.0, a breaking change raises the minor version.
 
+## 0.3.1 (2026-10-11)
+
+First release on crates.io. No code changes since 0.3.0.
+
+### Changed
+
+- Package metadata for crates.io: `repository`, `keywords` and `categories`
+- README links point to GitHub and docs.rs so they work on crates.io; the `virtual-bus-build` README adds
+  the dependencies from crates.io instead of the git tag
+
 ## 0.3.0 (2026-10-10)
 
 ### Breaking changes

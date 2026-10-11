@@ -2,7 +2,9 @@
 
 Virtual buses for running embedded-hal 1.0 I2C / SPI drivers against IC models on your PC.
 
-For an overview, see the repository's `README.md`. For usage, see `examples/` and the API documentation (`cargo doc --open`).
+For an overview, see the [repository README](https://github.com/Nagi-905/virtual-bus). For usage, see
+[`examples/`](https://github.com/Nagi-905/virtual-bus/tree/main/virtual-bus/examples) and the
+[API documentation](https://docs.rs/virtual-bus).
 
 ## Source layout
 
