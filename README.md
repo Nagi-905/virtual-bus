@@ -134,8 +134,11 @@ block_on(async {
 ```
 
 Nothing on the virtual buses really waits, so every future finishes on the first poll.
+A driver that yields in a polling loop (`yield_now`) is polled again; a future that waits for something
+that never comes here (a real timer, an interrupt) makes `block_on` panic instead of hanging the test.
 Keep the code you want to test in `async fn`s that take the bus and the delay as arguments,
 and leave executor-specific code (spawning tasks, `embassy_time::Timer`) in the firmware's `main`.
+`virtual-bus/tests/lis3dh_async.rs` runs `lis3dh-async` from crates.io this way, over I2C and SPI.
 
 ## Crates
 
@@ -158,7 +161,7 @@ Tested on Linux (including WSL2).
 - SPI: only 4-wire SPI with separate MOSI and MISO. 3-wire and Dual / Quad SPI are not supported
 - UART is not supported yet
 - Async: `block_on` only runs futures that finish without waiting for something outside the bus.
-  A driver that awaits a real timer or another task directly cannot be run with it
+  A driver that awaits a real timer or another task directly makes it panic
 
 ## License
 

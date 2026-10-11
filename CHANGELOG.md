@@ -11,7 +11,10 @@ runtime of the other. Before 1.0, a breaking change raises the minor version.
   `VirtualSpiDevice` the async `SpiDevice`, `VirtualSpiBus` and `BitBangSpi` the async `SpiBus`, and
   `SimDelay` the async `DelayNs`. Each calls its blocking twin, so the log and fault injection are the
   same and every future finishes on the first poll
-- **virtual-bus**: `block_on`, to call async drivers from a plain `#[test]`
+- **virtual-bus**: `block_on`, to call async drivers from a plain `#[test]`. A future that wakes itself
+  (`yield_now`) is polled again; one that returns `Pending` with nothing to wake it panics instead of
+  hanging the test
+- **virtual-bus**: a test running `lis3dh-async` from crates.io on a LIS3DH register map, over I2C and SPI
 
 ### Note
 

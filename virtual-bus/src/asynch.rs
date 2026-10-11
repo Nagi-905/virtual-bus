@@ -24,6 +24,9 @@
 
 use core::pin::pin;
 use core::task::{Context, Poll, Waker};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::Wake;
 
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal::{delay, i2c, spi};
@@ -39,17 +42,43 @@ use crate::bus::spi::{SpiError, SpiSlave, VirtualSpiBus, VirtualSpiDevice};
 
 /// Runs a future to completion on the current thread.
 ///
-/// It polls with a waker that does nothing (the pattern from the [`Waker::noop`] docs) until the
-/// future is ready. The buses in this crate never really wait, so their futures finish on the
-/// first poll. A future that waits for something outside (a real timer, another task) would
-/// spin here forever.
+/// The buses in this crate never really wait, so their futures finish on the first poll.
+/// A future that returns `Pending` after waking itself (`yield_now` in a polling loop) is polled
+/// again. One that returns `Pending` without being woken waits for something outside
+/// (a real timer, an interrupt, another task) that never comes here, so this panics instead of
+/// hanging the test.
+///
+/// # Panics
+///
+/// If the future returns `Pending` and nothing woke it.
 pub fn block_on<F: Future>(fut: F) -> F::Output {
+    let woken = Arc::new(Woken(AtomicBool::new(false)));
+    let waker = Waker::from(woken.clone());
+    let mut cx = Context::from_waker(&waker);
     let mut fut = pin!(fut);
-    let mut cx = Context::from_waker(Waker::noop());
     loop {
         if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
             return v;
         }
+        if !woken.0.swap(false, Ordering::Relaxed) {
+            panic!(
+                "block_on: the future is waiting for something outside the virtual bus \
+                 (a real timer, an interrupt, another task) and nothing here will wake it"
+            );
+        }
+    }
+}
+
+/// Records that the future asked to be polled again
+struct Woken(AtomicBool);
+
+impl Wake for Woken {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.0.store(true, Ordering::Relaxed);
     }
 }
 
@@ -177,6 +206,41 @@ mod tests {
     #[test]
     fn block_on_returns_the_output() {
         assert_eq!(block_on(async { 1 + 2 }), 3);
+    }
+
+    /// Returns `Pending` `n` times, waking itself each time, like `yield_now` in a polling loop
+    struct YieldTimes(u32);
+
+    impl Future for YieldTimes {
+        type Output = ();
+        fn poll(mut self: core::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+            if self.0 == 0 {
+                return Poll::Ready(());
+            }
+            self.0 -= 1;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    }
+
+    #[test]
+    fn block_on_polls_again_a_future_that_woke_itself() {
+        block_on(YieldTimes(3));
+    }
+
+    #[test]
+    #[should_panic(expected = "nothing here will wake it")]
+    fn block_on_panics_on_a_future_nothing_wakes() {
+        block_on(core::future::pending::<()>());
+    }
+
+    #[test]
+    #[should_panic(expected = "nothing here will wake it")]
+    fn block_on_panics_when_a_yield_is_followed_by_a_real_wait() {
+        block_on(async {
+            YieldTimes(2).await;
+            core::future::pending::<()>().await;
+        });
     }
 
     #[test]
