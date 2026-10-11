@@ -99,4 +99,5 @@ fn clones_share_one_time() {
     clock.advance_ns(250);
     other.delay().delay_us(1);
     assert_eq!((clock.now_ns(), other.now_ns()), (1_250, 1_250));
+    assert_eq!(clock.now_ps(), 1_250_000);
 }

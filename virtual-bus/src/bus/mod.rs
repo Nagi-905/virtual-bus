@@ -47,6 +47,7 @@ impl DelayNs for SimDelay {
 /// - Models read it (`now_ns`) to know if they are still busy
 /// - Drivers move it through [`delay`](Self::delay) (blocking and async `DelayNs`)
 /// - Clones share one time. The bus itself takes no time
+/// - Kept in ps, like the signal lines
 ///
 /// ```
 /// use embedded_hal::delay::DelayNs;
@@ -59,7 +60,7 @@ impl DelayNs for SimDelay {
 /// ```
 #[derive(Clone, Default)]
 pub struct SimClock {
-    ns: Rc<Cell<u64>>,
+    ps: Rc<Cell<u64>>,
 }
 
 impl SimClock {
@@ -67,18 +68,22 @@ impl SimClock {
         Self::default()
     }
 
+    pub fn now_ps(&self) -> u64 {
+        self.ps.get()
+    }
+
     pub fn now_ns(&self) -> u64 {
-        self.ns.get()
+        self.now_ps() / 1000
     }
 
     /// Moves time forward, e.g. per byte in a model of a chip that is polled without a delay
     pub fn advance_ns(&self, ns: u64) {
-        self.ns.set(self.ns.get() + ns);
+        self.ps.set(self.ps.get() + ns * 1000);
     }
 
     /// A `DelayNs` that moves this clock
     pub fn delay(&self) -> SimDelay {
-        let ns = self.ns.clone();
-        SimDelay::new(Rc::new(move |ps| ns.set(ns.get() + ps / 1000)))
+        let ps = self.ps.clone();
+        SimDelay::new(Rc::new(move |dt| ps.set(ps.get() + dt)))
     }
 }
