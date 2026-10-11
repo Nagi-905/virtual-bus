@@ -2,9 +2,9 @@
 //!
 //! - [`i2c`] — I2C transaction-level bus, bit-bang master and signal lines
 //! - [`spi`] — the same for SPI
-//! - [`pin`] — pin adapters (`InvertedPin` for logical inversion)
-//! - [`SimDelay`] — a `DelayNs` that advances the simulated time of the signal lines
-//! - [`SimClock`] — simulated time for models on the transaction-level buses
+//! - [`pin`] — `InvertedPin` for logical inversion, and `SimPin`, a wire such as IRQ or DRDY
+//! - [`SimDelay`] — a `DelayNs` that moves a `SimClock`
+//! - [`SimClock`] — simulated time, shared by models and the signal lines that follow it
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};

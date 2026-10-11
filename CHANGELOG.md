@@ -11,7 +11,10 @@ runtime of the other. Before 1.0, a breaking change raises the minor version.
 - The MCP23017 example's tests are split into the model on its own (`mcp23017_model.rs`) and the
   crates.io driver on both paths (`mcp23017_driver.rs`)
 - More tests: I2C data NACK on the signal lines, faults through a crates.io driver and recovery, one
-  driver on both SPI paths, `SimPin` edges, and the whole interrupt flow of the `spi_counter` RTL
+  driver on both SPI paths, `SimPin` edges, and the whole interrupt flow of the `spi_counter` RTL,
+  delays due at the same time, and several tasks waiting on one `SimPin`
+- README shows the dependencies to add; the `virtual-bus` README covers `asynch.rs`, `SimClock`,
+  `SimPin` and the scheduler
 
 ## 0.5.0 (2026-10-11)
 
