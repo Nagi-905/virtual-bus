@@ -3,35 +3,37 @@
 `virtual-bus` and `virtual-bus-build` share one version: the generated bindings of one must match the
 runtime of the other. Before 1.0, a breaking change raises the minor version.
 
-## Unreleased
+## 0.4.0 (2026-10-11)
 
 ### Breaking changes
 
 - **virtual-bus**: `VirtualI2cBus` calls `I2cSlave::write` one byte at a time, as the signal lines
   already did. After a model returns `Err(Nack)`, the rest of the write is not sent (UM10204: the
   master stops after a NACK). Models that expected the whole write in one call must collect the bytes
-  between `start` and `stop`. The signature is unchanged
-- **virtual-bus**: an empty write (address probe) no longer calls `write`
+  between `start` and `stop`. The signature is unchanged (c279dc4)
+- **virtual-bus**: an empty write (address probe) no longer calls `write` (c279dc4)
 
 ### Added
 
 - **virtual-bus**: embedded-hal-async. `VirtualI2cBus` and `BitBangI2c` implement the async `I2c`,
   `VirtualSpiDevice` the async `SpiDevice`, `VirtualSpiBus` and `BitBangSpi` the async `SpiBus`, and
   `SimDelay` the async `DelayNs`. Each calls its blocking twin, so the log and fault injection are the
-  same and every future finishes on the first poll
+  same and every future finishes on the first poll (2992eea)
 - **virtual-bus**: `block_on`, to call async drivers from a plain `#[test]`. A future that wakes itself
   (`yield_now`) is polled again; one that returns `Pending` with nothing to wake it panics instead of
-  hanging the test
+  hanging the test (2992eea, 5f7e7d5)
 - **virtual-bus**: `SimClock`, simulated time for models on the transaction-level buses. Models read
-  `now_ns`; drivers move it with `delay()` (a `SimDelay`, blocking and async). The bus itself takes no time
+  `now_ns`; drivers move it with `delay()` (a `SimDelay`, blocking and async). The bus itself takes no time.
+  Time is kept in ps, like the signal lines (561f131, 7439848)
 - **virtual-bus**: a test running `lis3dh-async` from crates.io on a LIS3DH register map, over I2C and SPI
+  (5f7e7d5)
 
 ### Note
 
 - Code that has both the blocking and the async trait in scope and calls a method on a bus with dot
   syntax (`bus.transaction(..)`) no longer compiles (E0034, multiple applicable items). Call it as
   `embedded_hal::i2c::I2c::transaction(&mut bus, ..)`, or drop a hand-written async adapter: the bus
-  is now async itself
+  is now async itself (2992eea)
 
 ## 0.3.1 (2026-10-11)
 
