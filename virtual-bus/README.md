@@ -56,24 +56,18 @@ Crate building blocks live only in `bus` and `devices`. Models of specific ICs l
 
 ### Time
 
-- `SimClock` is the simulated time for the whole test (in ps; clones share it)
-- Transaction-level buses take no time. Models read `now_ns` to know if they are still busy;
-  drivers move the clock through `clock.delay()` (a `SimDelay`)
-- `SimI2cBus::with_clock` / `SimSpiBus::with_clock` make signal lines follow a shared clock: moving it from
-  anywhere (a delay, a model's `advance_ns`, another bus) runs the system clocks of the models on those lines.
-  `new()` gives each bus its own clock
+- `SimClock`: one simulated time per test (ps). Clones share it
+- Models read it (`now_ns`); drivers move it (`clock.delay()`)
+- Transaction-level buses take no time
+- `with_clock(&clock)`: signal lines follow the clock and run their models when it moves
 
 ### Async
 
-- Every bus also implements its embedded-hal-async trait. Each async method calls the blocking one
-  (same log, same faults) and finishes on the first poll
-- `block_on` is the scheduler, like a SystemVerilog testbench:
-  - An async `SimDelay` stops the task like `#delay`. When nothing can run, `block_on` moves the clock to the
-    earliest deadline, so tasks joined together (`join` from embassy-futures) run in time order
-  - `SimPin` is a wire to wait on (`digital::Wait`). A wait sees only the edges after it starts
-  - When nothing can run and no delay is waiting (a real timer, an interrupt that never comes), it panics
-    instead of hanging the test
-- The blocking `DelayNs` moves the clock at once
+- Every bus also implements embedded-hal-async (calls the blocking one)
+- `block_on` schedules like a SystemVerilog testbench:
+  - async delay = `#delay`; time jumps to the next deadline
+  - `SimPin` = `@(posedge)` (`digital::Wait`)
+  - nothing left to wake it → panics instead of hanging
 
 ### Pin-level models
 

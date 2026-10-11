@@ -13,8 +13,7 @@ runtime of the other. Before 1.0, a breaking change raises the minor version.
 - More tests: I2C data NACK on the signal lines, faults through a crates.io driver and recovery, one
   driver on both SPI paths, `SimPin` edges, and the whole interrupt flow of the `spi_counter` RTL,
   delays due at the same time, and several tasks waiting on one `SimPin`
-- README shows the dependencies to add; the `virtual-bus` README covers `asynch.rs`, `SimClock`,
-  `SimPin` and the scheduler
+- READMEs: dependencies to add; `SimClock`, `SimPin` and `block_on`
 
 ## 0.5.0 (2026-10-11)
 

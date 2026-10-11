@@ -41,19 +41,15 @@ Time is simulated, so every run gives the same result, including timing-dependen
 
 ### Add the dependency
 
-The virtual buses are used from tests, so add it as a dev-dependency:
-
 ```toml
 [dev-dependencies]
 virtual-bus = "0.5.0"
 embedded-hal = "1.0"
-# for async drivers
-embedded-hal-async = "1.0"
-embassy-futures = "0.1"     # join, to run several tasks in one block_on
+embedded-hal-async = "1.0"  # async drivers only
+embassy-futures = "0.1"     # async: join
 ```
 
-For Verilog models, also add `virtual-bus-build` as a build-dependency: see
-[`virtual-bus-build/README.md`](virtual-bus-build/README.md).
+Verilog: see [`virtual-bus-build/README.md`](virtual-bus-build/README.md).
 
 ### Build a model and attach it
 
