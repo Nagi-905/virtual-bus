@@ -5,6 +5,14 @@ runtime of the other. Before 1.0, a breaking change raises the minor version.
 
 ## Unreleased
 
+### Breaking changes
+
+- **virtual-bus**: `VirtualI2cBus` calls `I2cSlave::write` one byte at a time, as the signal lines
+  already did. After a model returns `Err(Nack)`, the rest of the write is not sent (UM10204: the
+  master stops after a NACK). Models that expected the whole write in one call must collect the bytes
+  between `start` and `stop`. The signature is unchanged
+- **virtual-bus**: an empty write (address probe) no longer calls `write`
+
 ### Added
 
 - **virtual-bus**: embedded-hal-async. `VirtualI2cBus` and `BitBangI2c` implement the async `I2c`,

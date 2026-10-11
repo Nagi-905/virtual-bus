@@ -33,9 +33,11 @@ pub struct Nack;
 /// start(dir) → write(..) or read(..) zero or more times → (start(dir) again if the direction changes) → stop()
 /// ```
 ///
-/// `start` is called on every START and repeated START. `write` / `read` may be called
-/// several times within one transfer, so remember "the first byte of the transfer"
-/// in `start` (the pin-level path calls them one byte at a time).
+/// - `start` is called on every START and repeated START. Remember "the first byte of the
+///   transfer" there
+/// - `write` gets one byte per call, on every bus. After `Err(Nack)` the master sends no more
+/// - `read` may be called several times within one transfer (one byte at a time on the
+///   signal lines)
 ///
 /// When `start` returns `Err(Nack)`, the master sees an address NACK and the transaction ends.
 /// `stop` is called at the end of a transaction only if some `start` in it returned `Ok`: a write
@@ -46,7 +48,7 @@ pub trait I2cSlave {
     fn start(&mut self, _dir: Direction) -> Result<(), Nack> {
         Ok(())
     }
-    /// Receives bytes from the master. Return `Err(Nack)` to NACK the last byte
+    /// Receives one byte (`data.len() == 1`). Return `Err(Nack)` to NACK it
     fn write(&mut self, data: &[u8]) -> Result<(), Nack>;
     /// Fills in the bytes to send to the master
     fn read(&mut self, buf: &mut [u8]);
@@ -249,24 +251,19 @@ impl VirtualI2cBus {
             }
             match dir {
                 Direction::Write => {
-                    let data: Vec<u8> = ops[i..j]
-                        .iter()
-                        .flat_map(|op| match op {
-                            Operation::Write(d) => d.to_vec(),
-                            Operation::Read(_) => unreachable!(),
-                        })
-                        .collect();
-                    if let Some(n) = nack_at.filter(|&n| n < written + data.len()) {
-                        // accept up to the n-th byte, and NACK the n-th byte
-                        let _ = slave.write(&data[..n - written]);
-                        slave.stop();
-                        return Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Data));
+                    // one byte at a time, as on the wire: after a NACK the master sends no more
+                    let bytes = ops[i..j].iter().flat_map(|op| match op {
+                        Operation::Write(d) => d.iter().copied(),
+                        Operation::Read(_) => unreachable!(),
+                    });
+                    for b in bytes {
+                        let nacked = nack_at == Some(written) || slave.write(&[b]).is_err();
+                        if nacked {
+                            slave.stop();
+                            return Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Data));
+                        }
+                        written += 1;
                     }
-                    if slave.write(&data).is_err() {
-                        slave.stop();
-                        return Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Data));
-                    }
-                    written += data.len();
                 }
                 Direction::Read => {
                     let total: usize = ops[i..j]
@@ -382,13 +379,16 @@ mod tests {
             bus.write(0x21, &[1]),
             Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Address))
         );
-        assert_eq!(a.borrow().events, ["start Write", "write [01, 02]", "stop"]);
+        assert_eq!(
+            a.borrow().events,
+            ["start Write", "write [01]", "write [02]", "stop"]
+        );
         assert_eq!(bus.log().len(), 2);
         assert_eq!(bus.log()[1].address, 0x21);
     }
 
     #[test]
-    fn merges_same_direction_operations() {
+    fn same_direction_operations_share_one_start() {
         let a = shared(Recorder::default());
         let mut bus = VirtualI2cBus::new();
         bus.attach(0x50, a.clone()).unwrap();
@@ -408,7 +408,9 @@ mod tests {
             a.borrow().events,
             [
                 "start Write",
-                "write [10, 11, 12]",
+                "write [10]",
+                "write [11]",
+                "write [12]",
                 "start Read",
                 "read 3",
                 "stop"
@@ -464,7 +466,10 @@ mod tests {
             bus.write(0x20, &[0xA, 0xB, 0xC, 0xD]),
             Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Data))
         );
-        assert_eq!(a.borrow().events, ["start Write", "write [0a, 0b]", "stop"]);
+        assert_eq!(
+            a.borrow().events,
+            ["start Write", "write [0a]", "write [0b]", "stop"]
+        );
     }
 
     #[test]
@@ -482,6 +487,25 @@ mod tests {
         assert_eq!(
             bus.log()[0].result,
             Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Data))
+        );
+    }
+
+    #[test]
+    fn bytes_after_a_model_nack_are_not_sent() {
+        let a = shared(Recorder {
+            nack_after: Some(1),
+            ..Default::default()
+        });
+        let mut bus = VirtualI2cBus::new();
+        bus.attach(0x20, a.clone()).unwrap();
+        assert_eq!(
+            bus.write(0x20, &[1, 2, 3, 4]),
+            Err(ErrorKind::NoAcknowledge(NoAcknowledgeSource::Data))
+        );
+        // 02 is NACKed: 03 and 04 never reach the model
+        assert_eq!(
+            a.borrow().events,
+            ["start Write", "write [01]", "write [02]", "stop"]
         );
     }
 
