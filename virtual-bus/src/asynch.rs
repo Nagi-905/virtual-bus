@@ -1,8 +1,14 @@
 //! Async buses for async drivers (Embassy and the like), and [`block_on`] to run them in a test.
 //!
-//! - Every bus also implements its embedded-hal-async trait
-//! - Each async method calls the blocking one: same log, same faults
-//! - Nothing waits, so every future finishes on the first poll
+//! Works like a SystemVerilog testbench:
+//!
+//! - Every bus also implements its embedded-hal-async trait. Each async method calls the blocking
+//!   one (same log, same faults) and finishes on the first poll
+//! - The async `SimDelay` stops the task like `#delay`. [`block_on`] moves the clock when nothing
+//!   else can run, so tasks run in time order
+//! - [`SimPin`] is a wire to wait on (`digital::Wait`), like `wait` / `@(posedge)`
+//! - Several tasks: `block_on(join(firmware, sensor))`, with `join` from embassy-futures, like
+//!   `fork ... join`
 //!
 //! ```
 //! use embedded_hal_async::i2c::I2c;
@@ -20,8 +26,11 @@
 //!
 //! Several calls: `block_on(async { a.await; b.await })`.
 
-use core::pin::pin;
+use core::pin::{Pin, pin};
 use core::task::{Context, Poll, Waker};
+use std::cell::RefCell;
+use std::convert::Infallible;
+use std::future::poll_fn;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::Wake;
@@ -32,17 +41,21 @@ use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::i2c::I2c;
 use embedded_hal_async::spi::{SpiBus, SpiDevice};
 
-use crate::bus::SimDelay;
 use crate::bus::i2c::VirtualI2cBus;
 use crate::bus::i2c::bitbang::BitBangI2c;
+use crate::bus::pin::{SimPin, Wire};
 use crate::bus::spi::bitbang::BitBangSpi;
 use crate::bus::spi::{SpiError, SpiSlave, VirtualSpiBus, VirtualSpiDevice};
+use crate::bus::{SimClock, SimDelay};
 
-/// Runs a future to the end and returns its value.
+/// Runs a future to the end and returns its value. The scheduler of the simulation.
 ///
 /// - `Ready`: returns the value
-/// - `Pending`, woke itself (`yield_now`): polls again
-/// - `Pending`, nothing woke it: panics. It waits for a timer or an interrupt that never comes
+/// - `Pending`, something woke it (`yield_now`, a [`SimPin`] change): polls again
+/// - `Pending`, nothing woke it, a delay is waiting: moves that delay's clock to its deadline
+///   (running the signal lines on it), wakes it, polls again
+/// - `Pending`, nothing woke it, no delay waiting: panics. It waits for a real timer or an
+///   interrupt that never comes
 pub fn block_on<F: Future>(fut: F) -> F::Output {
     let woken = Arc::new(Woken(AtomicBool::new(false)));
     let waker = Waker::from(woken.clone());
@@ -52,12 +65,95 @@ pub fn block_on<F: Future>(fut: F) -> F::Output {
         if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
             return v;
         }
-        if !woken.0.swap(false, Ordering::Relaxed) {
+        if woken.0.swap(false, Ordering::Relaxed) {
+            continue;
+        }
+        let Some(timer) = next_timer() else {
             panic!(
                 "block_on: the future is waiting for something outside the virtual bus \
                  (a real timer, an interrupt, another task) and nothing here will wake it"
             );
+        };
+        let now = timer.clock.now_ps();
+        if timer.deadline_ps > now {
+            timer.clock.advance_ps(timer.deadline_ps - now);
         }
+        timer.waker.wake();
+    }
+}
+
+/// A task waiting for a clock to reach a time
+struct Timer {
+    id: u64,
+    clock: SimClock,
+    deadline_ps: u64,
+    waker: Waker,
+}
+
+thread_local! {
+    /// (last id, timers) of the delays waiting on this thread
+    static TIMERS: RefCell<(u64, Vec<Timer>)> = const { RefCell::new((0, Vec::new())) };
+}
+
+/// Takes out the timer due first (the earliest registered on a tie)
+fn next_timer() -> Option<Timer> {
+    TIMERS.with_borrow_mut(|(_, timers)| {
+        let i = (0..timers.len()).min_by_key(|&i| {
+            timers[i]
+                .deadline_ps
+                .saturating_sub(timers[i].clock.now_ps())
+        })?;
+        Some(timers.remove(i))
+    })
+}
+
+/// `#delay`: waits until the clock reaches the deadline. Leaves the timers when done or dropped
+struct Sleep {
+    clock: SimClock,
+    deadline_ps: u64,
+    id: Option<u64>,
+}
+
+impl Sleep {
+    fn cancel(&mut self) {
+        if let Some(id) = self.id.take() {
+            TIMERS.with_borrow_mut(|(_, timers)| timers.retain(|t| t.id != id));
+        }
+    }
+}
+
+impl Future for Sleep {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let this = self.get_mut();
+        if this.clock.now_ps() >= this.deadline_ps {
+            this.cancel();
+            return Poll::Ready(());
+        }
+        let id = this.id;
+        let new_id = TIMERS.with_borrow_mut(|(last, timers)| {
+            if let Some(t) = id.and_then(|id| timers.iter_mut().find(|t| t.id == id)) {
+                t.waker.clone_from(cx.waker());
+                return id;
+            }
+            *last += 1;
+            timers.push(Timer {
+                id: *last,
+                clock: this.clock.clone(),
+                deadline_ps: this.deadline_ps,
+                waker: cx.waker().clone(),
+            });
+            Some(*last)
+        });
+        this.id = new_id;
+        Poll::Pending
+    }
+}
+
+impl Drop for Sleep {
+    fn drop(&mut self) {
+        self.cancel();
     }
 }
 
@@ -159,8 +255,60 @@ where
 }
 
 impl DelayNs for SimDelay {
+    /// Stops the task until the clock has moved `ns` on. `block_on` moves it when nothing can run
     async fn delay_ns(&mut self, ns: u32) {
-        delay::DelayNs::delay_ns(self, ns)
+        Sleep {
+            clock: self.clock.clone(),
+            deadline_ps: self.clock.now_ps() + u64::from(ns) * 1000,
+            id: None,
+        }
+        .await;
+    }
+}
+
+async fn wait_until(pin: &SimPin, done: impl Fn(&Wire) -> bool) {
+    poll_fn(|cx| {
+        let mut w = pin.0.borrow_mut();
+        if done(&w) {
+            return Poll::Ready(());
+        }
+        w.waiting.push(cx.waker().clone());
+        Poll::Pending
+    })
+    .await;
+}
+
+/// Edge waits count only the edges after the call, as on a real HAL
+impl embedded_hal_async::digital::Wait for SimPin {
+    async fn wait_for_high(&mut self) -> Result<(), Infallible> {
+        wait_until(self, |w| w.high).await;
+        Ok(())
+    }
+
+    async fn wait_for_low(&mut self) -> Result<(), Infallible> {
+        wait_until(self, |w| !w.high).await;
+        Ok(())
+    }
+
+    async fn wait_for_rising_edge(&mut self) -> Result<(), Infallible> {
+        let start = self.0.borrow().rising;
+        wait_until(self, |w| w.rising > start).await;
+        Ok(())
+    }
+
+    async fn wait_for_falling_edge(&mut self) -> Result<(), Infallible> {
+        let start = self.0.borrow().falling;
+        wait_until(self, |w| w.falling > start).await;
+        Ok(())
+    }
+
+    async fn wait_for_any_edge(&mut self) -> Result<(), Infallible> {
+        let start = {
+            let w = self.0.borrow();
+            w.rising + w.falling
+        };
+        wait_until(self, |w| w.rising + w.falling > start).await;
+        Ok(())
     }
 }
 
@@ -321,9 +469,10 @@ mod tests {
         ready(SpiDevice::transfer_in_place(&mut dev, &mut b)).unwrap();
         assert_eq!(b[1], 0xA5);
 
+        // an async delay stops the task; block_on moves the clock
         let mut delay = lines.delay();
         let before = lines.now_ns();
-        ready(DelayNs::delay_us(&mut delay, 5));
+        block_on(DelayNs::delay_us(&mut delay, 5));
         assert_eq!(lines.now_ns() - before, 5_000);
     }
 

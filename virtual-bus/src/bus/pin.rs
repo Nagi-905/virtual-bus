@@ -1,9 +1,15 @@
-//! Pin adapters.
+//! Pins.
 //!
-//! [`InvertedPin`] inverts the logic of any [`OutputPin`] / [`InputPin`].
-//! embedded-hal-bus's `ExclusiveDevice` and most drivers assume "drive CS low to select",
-//! so for an IC with an active-high CS, wrap the CS pin in this before passing it on.
-//! The same as putting an inverter in front of the pin on real hardware.
+//! - [`InvertedPin`] inverts the logic of any [`OutputPin`] / [`InputPin`].
+//!   embedded-hal-bus's `ExclusiveDevice` and most drivers assume "drive CS low to select",
+//!   so for an IC with an active-high CS, wrap the CS pin in this before passing it on.
+//!   The same as putting an inverter in front of the pin on real hardware
+//! - [`SimPin`] is a wire from a chip to the MCU (IRQ, DRDY) that drivers can wait on
+
+use std::cell::RefCell;
+use std::convert::Infallible;
+use std::rc::Rc;
+use std::task::Waker;
 
 use embedded_hal::digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin};
 
@@ -62,6 +68,82 @@ impl<P: InputPin> InputPin for InvertedPin<P> {
 
     fn is_low(&mut self) -> Result<bool, Self::Error> {
         self.inner.is_high()
+    }
+}
+
+/// One wire that tests and models drive and drivers read or wait on, such as an IRQ or DRDY line.
+///
+/// - `set(true)` / `set(false)` drives it. Clones share the wire
+/// - Drivers get it as `InputPin`, and as async `digital::Wait` (see [`crate::asynch`])
+/// - A wait sees only the edges after it starts, as on a real HAL
+#[derive(Clone)]
+pub struct SimPin(pub(crate) Rc<RefCell<Wire>>);
+
+pub(crate) struct Wire {
+    pub(crate) high: bool,
+    pub(crate) rising: u64,
+    pub(crate) falling: u64,
+    pub(crate) waiting: Vec<Waker>,
+}
+
+impl SimPin {
+    pub fn new(high: bool) -> Self {
+        Self(Rc::new(RefCell::new(Wire {
+            high,
+            rising: 0,
+            falling: 0,
+            waiting: Vec::new(),
+        })))
+    }
+
+    /// Drives the wire, and wakes the tasks waiting on it if the level changes
+    pub fn set(&self, high: bool) {
+        let waiting = {
+            let mut w = self.0.borrow_mut();
+            if w.high == high {
+                return;
+            }
+            w.high = high;
+            if high {
+                w.rising += 1;
+            } else {
+                w.falling += 1;
+            }
+            std::mem::take(&mut w.waiting)
+        };
+        for t in waiting {
+            t.wake();
+        }
+    }
+
+    pub fn level(&self) -> bool {
+        self.0.borrow().high
+    }
+}
+
+impl ErrorType for SimPin {
+    type Error = Infallible;
+}
+
+impl InputPin for SimPin {
+    fn is_high(&mut self) -> Result<bool, Infallible> {
+        Ok(self.level())
+    }
+
+    fn is_low(&mut self) -> Result<bool, Infallible> {
+        Ok(!self.level())
+    }
+}
+
+impl OutputPin for SimPin {
+    fn set_low(&mut self) -> Result<(), Infallible> {
+        self.set(false);
+        Ok(())
+    }
+
+    fn set_high(&mut self) -> Result<(), Infallible> {
+        self.set(true);
+        Ok(())
     }
 }
 

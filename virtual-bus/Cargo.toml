@@ -17,6 +17,7 @@ embedded-hal-async = "1.0"
 embedded-hal-bus = { version = "0.3", features = ["std", "async"] }
 mcp23017-driver = "0.1.2"
 lis3dh-async = "0.9.3"
+embassy-futures = "0.1"
 
 [[example]]
 name = "mcp23017"

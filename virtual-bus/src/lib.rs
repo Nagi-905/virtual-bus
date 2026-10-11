@@ -28,7 +28,7 @@
 //! | Attach Verilog RTL | See "Attaching Verilog" below |
 //! | Give models time (busy, measuring) on the fast buses | [`SimClock`] |
 //! | Inject faults such as NACKs | [`VirtualI2cBus::inject_fault`], [`bus::spi::VirtualSpiDevice::inject_fault`] |
-//! | Run async drivers (embedded-hal-async, Embassy) | The same buses, and [`block_on`] (see [`asynch`]) |
+//! | Run async drivers (embedded-hal-async, Embassy) | The same buses, [`block_on`] and [`SimPin`] (see [`asynch`]) |
 //!
 //! Runnable examples are in `virtual-bus/examples/` in the repository.
 //!
@@ -52,4 +52,5 @@ pub mod verilated;
 
 pub use asynch::block_on;
 pub use bus::i2c::{AttachError, Direction, Fault, I2cSlave, LogEntry, LogOp, Nack, VirtualI2cBus};
+pub use bus::pin::SimPin;
 pub use bus::{Shared, SimClock, SimDelay, shared};

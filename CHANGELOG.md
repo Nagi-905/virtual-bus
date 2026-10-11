@@ -11,8 +11,17 @@ runtime of the other. Before 1.0, a breaking change raises the minor version.
   on the buses. Timing margins are checked on real hardware; a model that needs a minimum CS high time
   can compare the time of `select` with that of the last `deselect` itself. The gap the master leaves
   between frames (`set_cs_high_ns`) stays
+- **virtual-bus**: the async `SimDelay` stops the task until its clock has moved on, like `#delay` in
+  SystemVerilog, instead of moving the clock at once. `block_on` moves the clock to the next deadline when
+  nothing can run, so tasks joined together run in time order. Async code that awaited a delay outside
+  `block_on` (polling by hand) now sees `Pending`. The blocking `DelayNs` still moves the clock at once
 
 ### Added
+
+- **virtual-bus**: `SimPin`, a wire from a chip (IRQ, DRDY) that tests and models drive and drivers read
+  (`InputPin`) or wait on (`digital::Wait`). A wait sees only the edges after it starts, as on a real HAL
+- **virtual-bus**: `block_on` is a scheduler: wakes a `SimPin` waiter, moves time for a waiting delay,
+  and drops the timer of a delay that was dropped (a timeout that lost a `select`)
 
 - **virtual-bus**: `SimI2cBus::with_clock` / `SimSpiBus::with_clock` and `clock()`. Signal lines can share
   one `SimClock` with transaction-level models: moving it from anywhere (a delay, a model's `advance_ns`,

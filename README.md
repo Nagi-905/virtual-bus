@@ -134,12 +134,29 @@ block_on(async {
 .unwrap();
 ```
 
-Nothing on the virtual buses really waits, so every future finishes on the first poll.
-A driver that yields in a polling loop (`yield_now`) is polled again; a future that waits for something
-that never comes here (a real timer, an interrupt) makes `block_on` panic instead of hanging the test.
-Keep the code you want to test in `async fn`s that take the bus and the delay as arguments,
-and leave executor-specific code (spawning tasks, `embassy_time::Timer`) in the firmware's `main`.
-`virtual-bus/tests/lis3dh_async.rs` runs `lis3dh-async` from crates.io this way, over I2C and SPI.
+`block_on` schedules like a SystemVerilog testbench:
+
+- Bus calls finish on the first poll
+- An async delay (`SimClock::delay()`) stops the task like `#delay`. When nothing can run, `block_on`
+  moves the clock to the next deadline, so tasks run in time order
+- `SimPin` is a wire from a chip (IRQ, DRDY) that drivers wait on (`digital::Wait`)
+- Run the firmware and the outside world side by side with a `join` (embassy-futures), like `fork ... join`
+
+```rust
+let (value, ()) = block_on(join(
+    async { read_when_ready(&mut bus, &mut drdy_pin).await },  // the firmware, unchanged
+    async {                                                   // the sensor
+        delay.delay_ms(1).await;                               // converts for 1 ms
+        drdy.set(true);
+    },
+));
+```
+
+A future that waits for something that never comes here (a real timer, an interrupt) makes `block_on`
+panic instead of hanging the test. Keep the code you want to test in `async fn`s that take the bus, the
+pins and the delay as arguments, and leave executor-specific code (spawning tasks, `embassy_time::Timer`)
+in the firmware's `main`. `virtual-bus/tests/lis3dh_async.rs` runs `lis3dh-async` from crates.io this way,
+and `virtual-bus/tests/scheduler.rs` shows the scheduling.
 
 ## Crates
 
@@ -161,8 +178,8 @@ Tested on Linux (including WSL2).
 - I2C: clock stretching, arbitration, multi-master and 10-bit addresses are not supported
 - SPI: only 4-wire SPI with separate MOSI and MISO. 3-wire and Dual / Quad SPI are not supported
 - UART is not supported yet
-- Async: `block_on` only runs futures that finish without waiting for something outside the bus.
-  A driver that awaits a real timer or another task directly makes it panic
+- Async: `block_on` only moves time for `SimDelay`. A driver that awaits a real timer
+  (`embassy_time::Timer`) directly makes it panic
 
 ## License
 
