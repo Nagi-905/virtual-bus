@@ -1,14 +1,11 @@
-//! `lis3dh-async` from crates.io, unchanged, against a LIS3DH register map, over I2C and SPI.
-//! Checks that an async-only driver runs on the virtual buses through `block_on`.
+//! Runs `lis3dh-async` (crates.io, unchanged) on a LIS3DH register map, over I2C and SPI.
 //!
-//! Register values from ST "LIS3DH", DocID17530 Rev 2:
-//! - Table 21: WHO_AM_I 0Fh = 33h, CTRL_REG0 1Eh = 10h, CTRL_REG1 20h = 07h, others 00h
-//! - 8.8 CTRL_REG1: ODR[3:0] LPen Zen Yen Xen. 8.11 CTRL_REG4: BDU BLE FS[1:0] HR ST[1:0] SIM.
-//!   TEMP_CFG_REG 1Fh: ADC_EN is bit 7
-//! - Table 4: high-resolution mode, ±2 g: 1 mg/digit. 8.16-8.18: OUT_X_L..OUT_Z_H (28h-2Dh) are
-//!   left-justified two's complement, LSB first
-//! - I2C: bit 7 of the sub-address enables auto-increment (6.1.1). SPI: bit 7 RW, bit 6 MS
-//!   (auto-increment), mode 3 (6.2)
+//! Values from the datasheet (ST DocID17530 Rev 2):
+//! - Defaults: WHO_AM_I 33h, CTRL_REG0 10h, CTRL_REG1 07h, others 00h (Table 21)
+//! - Bits: CTRL_REG1 = ODR[3:0] LPen Zen Yen Xen (8.8), CTRL_REG4 = BDU BLE FS[1:0] HR ST[1:0] SIM
+//!   (8.11), TEMP_CFG_REG bit 7 = ADC_EN
+//! - Output: HR, ±2 g = 1 mg/digit, 12 bits left-justified, LSB first (Table 4, 8.16-8.18)
+//! - Auto-increment: I2C bit 7 (6.1.1). SPI: bit 7 = read, bit 6 = increment, mode 3 (6.2)
 
 use embedded_hal::i2c::{ErrorKind, NoAcknowledgeSource};
 use embedded_hal::spi::MODE_3;
@@ -37,7 +34,7 @@ fn lis3dh() -> RegisterMap {
     m
 }
 
-/// The sensor measures `mg` on each axis (high-resolution, ±2 g: 1 mg/digit, 12 bits left-justified)
+/// Sets what the sensor reads, in mg per axis (HR, ±2 g)
 fn expose(m: &RegisterMap, mg: [i16; 3]) {
     for (i, v) in mg.into_iter().enumerate() {
         let [lo, hi] = (v << 4).to_le_bytes();
@@ -47,9 +44,9 @@ fn expose(m: &RegisterMap, mg: [i16; 3]) {
 }
 
 fn assert_default_config(m: &RegisterMap) {
-    // ODR 400 Hz (0111), LPen = 0, X/Y/Z enabled
+    // 400 Hz, X/Y/Z on
     assert_eq!(m.get(CTRL_REG1), 0x77);
-    // BDU, ±2 g, HR: high-resolution mode
+    // BDU, high resolution, ±2 g
     assert_eq!(m.get(CTRL_REG4), 0x88);
     assert_eq!(m.get(TEMP_CFG_REG) & 0x80, 0x80, "ADC_EN");
 }
@@ -100,7 +97,7 @@ fn several_calls_in_one_block() {
 
 #[test]
 fn bus_errors_reach_the_async_driver() {
-    // nothing at the alternate address
+    // nobody at 0x19
     let mut bus = VirtualI2cBus::new();
     bus.attach(0x18, lis3dh().i2c(I2cFormat::inc_bit7()))
         .unwrap();
@@ -111,7 +108,7 @@ fn bus_errors_reach_the_async_driver() {
         )))
     ));
 
-    // an injected NACK on the next transaction: the read of the axes
+    // NACK the next transaction (the axis read)
     bus.inject_fault(Fault::AddressNack);
     let mut accel = block_on(Lis3dh::new_i2c_without_config(&mut bus, SlaveAddr::Default));
     assert!(matches!(

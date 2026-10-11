@@ -1,9 +1,8 @@
-//! embedded-hal-async for the virtual buses, and [`block_on`] to call async drivers from a test.
+//! Async buses for async drivers (Embassy and the like), and [`block_on`] to run them in a test.
 //!
-//! Every type that implements a blocking embedded-hal trait also implements its
-//! embedded-hal-async twin, so async drivers (for Embassy, for example) take the same buses.
-//! Each async method calls the blocking one, so the behavior, the log and fault injection are
-//! the same, and nothing really waits: every future finishes on its first poll.
+//! - Every bus also implements its embedded-hal-async trait
+//! - Each async method calls the blocking one: same log, same faults
+//! - Nothing waits, so every future finishes on the first poll
 //!
 //! ```
 //! use embedded_hal_async::i2c::I2c;
@@ -19,8 +18,7 @@
 //! assert_eq!(who[0], 0xA5);
 //! ```
 //!
-//! To call several async functions, put them in one `async` block:
-//! `block_on(async { a.await; b.await })`.
+//! Several calls: `block_on(async { a.await; b.await })`.
 
 use core::pin::pin;
 use core::task::{Context, Poll, Waker};
@@ -40,17 +38,11 @@ use crate::bus::i2c::bitbang::BitBangI2c;
 use crate::bus::spi::bitbang::BitBangSpi;
 use crate::bus::spi::{SpiError, SpiSlave, VirtualSpiBus, VirtualSpiDevice};
 
-/// Runs a future to completion on the current thread.
+/// Runs a future to the end and returns its value.
 ///
-/// The buses in this crate never really wait, so their futures finish on the first poll.
-/// A future that returns `Pending` after waking itself (`yield_now` in a polling loop) is polled
-/// again. One that returns `Pending` without being woken waits for something outside
-/// (a real timer, an interrupt, another task) that never comes here, so this panics instead of
-/// hanging the test.
-///
-/// # Panics
-///
-/// If the future returns `Pending` and nothing woke it.
+/// - `Ready`: returns the value
+/// - `Pending`, woke itself (`yield_now`): polls again
+/// - `Pending`, nothing woke it: panics. It waits for a timer or an interrupt that never comes
 pub fn block_on<F: Future>(fut: F) -> F::Output {
     let woken = Arc::new(Woken(AtomicBool::new(false)));
     let waker = Waker::from(woken.clone());
@@ -69,7 +61,7 @@ pub fn block_on<F: Future>(fut: F) -> F::Output {
     }
 }
 
-/// Records that the future asked to be polled again
+/// Set when the future asks to be polled again
 struct Woken(AtomicBool);
 
 impl Wake for Woken {
@@ -184,7 +176,7 @@ mod tests {
     use embedded_hal::spi::MODE_0;
     use embedded_hal_bus::spi::ExclusiveDevice;
 
-    /// Polls once; fails the test unless the future finished
+    /// Polls once. Fails if the future is not done
     fn ready<F: Future>(fut: F) -> F::Output {
         match pin!(fut).poll(&mut Context::from_waker(Waker::noop())) {
             Poll::Ready(v) => v,
@@ -196,7 +188,7 @@ mod tests {
         RegisterMap::new().ro(0x0F, 0xA5).rw(0x10, 0x00)
     }
 
-    /// The kind of code an async driver has: generic over the async trait
+    /// Like an async driver: generic over the async trait
     async fn read_whoami<I: I2c>(i2c: &mut I, address: u8) -> Result<u8, I::Error> {
         let mut b = [0u8];
         i2c.write_read(address, &[0x0F], &mut b).await?;
@@ -208,7 +200,7 @@ mod tests {
         assert_eq!(block_on(async { 1 + 2 }), 3);
     }
 
-    /// Returns `Pending` `n` times, waking itself each time, like `yield_now` in a polling loop
+    /// `Pending` n times, waking itself each time (like `yield_now`)
     struct YieldTimes(u32);
 
     impl Future for YieldTimes {
@@ -259,7 +251,7 @@ mod tests {
         ready(I2c::write(&mut bus, 0x29, &[0x10, 0x5A])).unwrap();
         assert_eq!(map.get(0x10), 0x5A);
 
-        // the same log and faults as the blocking calls
+        // same log and faults as the blocking calls
         assert_eq!(bus.log().len(), 2);
         bus.inject_fault(Fault::DataNack { index: 1 });
         assert_eq!(
@@ -309,7 +301,7 @@ mod tests {
     #[test]
     fn virtual_spi_bus_with_async_exclusive_device() {
         let (bus, cs) = virtual_spi_bus(regs().spi(SpiFormat::read_bit7_inc_bit6()), MODE_0);
-        // embedded-hal-bus's async ExclusiveDevice needs an async SpiBus and an async DelayNs
+        // async ExclusiveDevice needs an async SpiBus and DelayNs
         let mut dev = ExclusiveDevice::new_no_delay(bus, cs).unwrap();
         let mut b = [0x8F, 0x00];
         ready(SpiDevice::transfer_in_place(&mut dev, &mut b)).unwrap();
