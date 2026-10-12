@@ -30,7 +30,7 @@ assert_eq!(id[0], 0xA5);
 
 ```toml
 [dev-dependencies]
-virtual-bus = "0.5.0"
+virtual-bus = "0.5.1"
 ```
 
 For an overview, see the [repository README](https://github.com/Nagi-905/virtual-bus). For usage, see

@@ -1,6 +1,6 @@
 [package]
 name = "virtual-bus"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Test embedded Rust drivers without hardware — from register maps to RTL simulation. Virtual I2C / SPI buses for embedded-hal 1.0"

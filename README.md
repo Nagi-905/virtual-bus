@@ -46,7 +46,7 @@ Time is simulated, so every run gives the same result, including timing-dependen
 
 ```toml
 [dev-dependencies]
-virtual-bus = "0.5.0"
+virtual-bus = "0.5.1"
 embedded-hal = "1.0"
 embedded-hal-async = "1.0"  # async drivers only
 embassy-futures = "0.1"     # async: join

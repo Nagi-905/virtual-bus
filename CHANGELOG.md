@@ -3,7 +3,15 @@
 `virtual-bus` and `virtual-bus-build` share one version: the generated bindings of one must match the
 runtime of the other. Before 1.0, a breaking change raises the minor version.
 
-## Unreleased
+## 0.5.1 (2026-10-12)
+
+No code changes since 0.5.0.
+
+### Changed
+
+- The crates.io README, the package description and the crate docs open with what the crate is for:
+  testing embedded Rust drivers without hardware, from register maps to RTL simulation. The crates.io
+  README adds a short list of benefits and an example (2451272)
 
 ### Repository
 
