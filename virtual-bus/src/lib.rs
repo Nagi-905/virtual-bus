@@ -1,3 +1,5 @@
+//! Test embedded Rust drivers without hardware — from register maps to RTL simulation.
+//!
 //! Virtual buses for running embedded-hal 1.0 I2C / SPI drivers against IC models on your PC.
 //!
 //! Drivers only use the embedded-hal traits, so passing the types from this crate instead of a real bus is all it takes.

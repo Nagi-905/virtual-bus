@@ -2,7 +2,10 @@
 
 [![CI](https://github.com/Nagi-905/virtual-bus/actions/workflows/ci.yml/badge.svg)](https://github.com/Nagi-905/virtual-bus/actions/workflows/ci.yml)
 
-A Rust crate for running embedded-hal 1.0 I2C / SPI drivers against IC models on your PC, without real hardware.
+**Test embedded Rust drivers without hardware — from register maps to RTL simulation.**
+
+Hand your embedded-hal 1.0 I2C / SPI driver a virtual bus instead of a real one, attach a model of the chip,
+and run it with `cargo test`. The model can be a list of registers, a chip written in Rust, or your own Verilog.
 
 ## Features
 

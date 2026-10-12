@@ -1,6 +1,37 @@
 # virtual-bus
 
-Virtual buses for running embedded-hal 1.0 I2C / SPI drivers against IC models on your PC.
+**Test embedded Rust drivers without hardware — from register maps to RTL simulation.**
+
+Hand your embedded-hal 1.0 I2C / SPI driver a virtual bus instead of a real one, attach a model of the chip,
+and run it with `cargo test`. No board, no changes to the driver.
+
+- **Runs your code unchanged**: drivers from crates.io and your own driver code, blocking or async
+  (embedded-hal-async)
+- **Go as deep as you need**: a register list in one line, a chip model written in Rust,
+  or your own Verilog (with `virtual-bus-build` and Verilator 5.x) — the driver sees the same embedded-hal traits
+- **Reproduces what real hardware rarely shows**: NACKs, bus errors, busy chips, flipped bits.
+  Time is simulated, so every run gives the same result
+
+```rust
+use embedded_hal::i2c::I2c;
+use virtual_bus::VirtualI2cBus;
+use virtual_bus::devices::register::{I2cFormat, RegisterMap};
+
+// A chip with WHO_AM_I = 0xA5 at register 0x0F, on I2C address 0x29
+let regs = RegisterMap::new().ro(0x0F, 0xA5).rw(0x10, 0x00);
+let mut bus = VirtualI2cBus::new();
+bus.attach(0x29, regs.i2c(I2cFormat::new())).unwrap();
+
+// Pass `&mut bus` to any embedded-hal driver; here we call it directly
+let mut id = [0u8];
+bus.write_read(0x29, &[0x0F], &mut id).unwrap();
+assert_eq!(id[0], 0xA5);
+```
+
+```toml
+[dev-dependencies]
+virtual-bus = "0.5.0"
+```
 
 For an overview, see the [repository README](https://github.com/Nagi-905/virtual-bus). For usage, see
 [`examples/`](https://github.com/Nagi-905/virtual-bus/tree/main/virtual-bus/examples) and the
